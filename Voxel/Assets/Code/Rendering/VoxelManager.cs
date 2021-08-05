@@ -1,6 +1,7 @@
 ﻿using Atrufulgium.Voxels.Base;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Atrufulgium.Voxels.Rendering {
@@ -14,12 +15,11 @@ namespace Atrufulgium.Voxels.Rendering {
         /// </summary>
         public static Mesh GetVoxelHelperMesh(int voxelCount) {
             // Not caching anything, just testing now.
-            return new Mesh {
-                vertices = new Vector3[voxelCount],
-                triangles = new int[0],
-                // Manually specify non-trivial bounds -- otherwise it gets culled.
-                bounds = new Bounds(Vector3.zero, Vector3.one / 100f)
+            Mesh m = new Mesh {
+                vertices = new Vector3[voxelCount]
             };
+            m.SetIndices(Enumerable.Range(0, voxelCount).ToArray(), MeshTopology.Points, 0);
+            return m;
         }
     }
 }
