@@ -80,20 +80,24 @@ void Geometry(point float4 id[1] : TEXCOORD0, inout TriangleStream<geometry_out>
     o.color = float4(1,0,0,1);
     o.normal = 0;
 
-    o.position = float4(0,0,0,1);
-    outStream.Append(ManualVertex(o));
-    o.position = float4( 1,0,0,1);
-    outStream.Append(ManualVertex(o));
-    o.position = float4(0, 1,0,1);
-    outStream.Append(ManualVertex(o));
-    outStream.RestartStrip();
-    o.position = float4( 1,0,0,1);
-    outStream.Append(ManualVertex(o));
-    o.position = float4(0,0,0,1);
-    outStream.Append(ManualVertex(o));
-    o.position = float4(0, 1,0,1);
-    outStream.Append(ManualVertex(o));
-    outStream.RestartStrip();
+    // o.position = float4(0,0,0,1);
+    // outStream.Append(ManualVertex(o));
+    // o.position = float4(1,0,0,1);
+    // outStream.Append(ManualVertex(o));
+    // o.position = float4(1,1,0,1);
+    // outStream.Append(ManualVertex(o));
+    // outStream.RestartStrip();
+    // o.position = float4(0,1,0,1);
+    // outStream.Append(ManualVertex(o));
+    // o.position = float4(0,0,0,1);
+    // outStream.Append(ManualVertex(o));
+    // o.position = float4(1,1,0,1);
+    // outStream.Append(ManualVertex(o));
+    // outStream.RestartStrip();
+    // return;
+
+    CreateQuad(float3(1,0,0), float3(0,1,0), float4(1,0,0,1), outStream);
+    CreateQuad(float3(0,1,0), float3(1,0,0), float4(0,1,0,1), outStream);
 
     return;
 

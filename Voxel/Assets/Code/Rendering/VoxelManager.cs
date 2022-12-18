@@ -16,9 +16,11 @@ namespace Atrufulgium.Voxels.Rendering {
         public static Mesh GetVoxelHelperMesh(int voxelCount) {
             // Not caching anything, just testing now.
             Mesh m = new Mesh {
-                vertices = new Vector3[voxelCount]
+                vertices = new Vector3[] { Vector3.zero },
+                // TODO: Not make the mesh disappear at the edge
+                bounds = new Bounds(Vector3.zero, Vector3.one)
             };
-            m.SetIndices(Enumerable.Range(0, voxelCount).ToArray(), MeshTopology.Points, 0);
+            m.SetIndices(new int[voxelCount], MeshTopology.Points, 0);
             return m;
         }
     }

@@ -9,7 +9,7 @@ Shader "Voxel/DrawVoxels"
 
         Pass
         {
-            Cull Off
+            Cull Back
             Blend One OneMinusSrcAlpha
 
             CGPROGRAM
