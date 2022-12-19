@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,6 +16,8 @@ namespace Atrufulgium.Voxel.Base {
     // determined parts for each LoD size and also octtrees or something) to
     // not have a bazillion cache misses.
     // For that, see also System.ArraySegment<T>.
+    // More specifically, note https://0fps.net/2012/01/14/an-analysis-of-minecraft-like-engines/
+    // Use virtual chunks and from the comments also z-curves.
     public readonly struct Chunk : IEnumerable<(int3, ushort)> {
         /// <summary>
         /// A value [0,5] representing how much detail this chunk has.       <br/>
@@ -95,7 +96,7 @@ namespace Atrufulgium.Voxel.Base {
             }
         }
 
-        // TODO: Test
+        // These are brute-force checked over all (LoD,pos)'s.
         public int CoordToIndex(int3 coord) {
             coord >>= LoD;
             int inverseLod = 5 - LoD;
@@ -117,13 +118,7 @@ namespace Atrufulgium.Voxel.Base {
 
         /// <summary>
         /// <para>
-        /// Turns this chunk into meshes. In particular, each vertex:
-        /// <list type="bullet">
-        /// <item> Has <b>no</b> normals. Voxels are simple, these can be
-        /// derived easily in shaders. </item>
-        /// <item> Has <b>no</b> uvs. Again, these can be derived in shaders. </item>
-        /// <item> Uses the position's w-value for the voxel material. </item>
-        /// </list>
+        /// Turns this chunk into meshes.
         /// </para>
         /// <para>
         /// Any face whose normals would be opposite to <paramref name="viewDir"/>
@@ -168,17 +163,26 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         /// <summary>
-        /// See the documentation of <see cref="GetMesh(int3)"/>
+        /// Turns a (x,y,z,material) into a single uint, by storing in the
+        /// first three factors 33 the coordinate positions, and in the
+        /// remaining [0,119513]-range the material.
         /// </summary>
         struct Vertex {
-            public float4 pos;
+            public uint data;
 
+            /// <summary>
+            /// The `pos` vector should actually be integer with values between
+            /// 0 and 32 inclusive. The material should be [0,119513].
+            /// </summary>
             public Vertex(float3 pos, ushort material) {
-                this.pos = new float4(pos, math.asfloat((uint)material));
+                data = (uint)pos.x
+                    + 33u * (uint)pos.y
+                    + 33u * 33u * (uint)pos.z
+                    + 33u * 33u * 33u * material;
             }
         }
         static readonly VertexAttributeDescriptor[] Layout = new VertexAttributeDescriptor[] {
-            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 4)
+            new VertexAttributeDescriptor(VertexAttribute.BlendIndices, VertexAttributeFormat.UInt32, 1)
         };
 
         /// <summary>
@@ -205,6 +209,36 @@ namespace Atrufulgium.Voxel.Base {
                 return a;
             // This accounts for the (a,c,c), (c,b,c), and (a,b,c) cases.
             return c;
+        }
+
+        // Note: You'll never update these functions, also they don't need to
+        // be tested anymore because I've run a brute force check on [0,32]^3
+        // that they're eachother's inverses.
+        /// <summary>
+        /// Interleaves the bit patterns 00xxxxxx, 00yyyyyy, 00zzzzzz into a
+        /// new number ..xyzxyz. All arguments must fit in 6 bits and this is
+        /// not checked.
+        /// </summary>
+        private static uint Morton3(uint3 v) {
+            // Each line, copy v over and mask to turn e.g. 0000abcd into
+            // abcdabcd and then mask into ab0000cd. Then b,d are correct.
+            // Really, just write it out on paper, that's easier to grasp.
+            v = (v | (v << 8)) & 0x300F;
+            v = (v | (v << 4)) & 0x30C3;
+            v = (v | (v << 2)) & 0x9249;
+            return v.x + 2 * v.y + 4 * v.z;
+        }
+
+        /// <summary>
+        /// Given an interleaved bit pattern ..xyzxyz, restores 6-bit patterns
+        /// 00xxxxxx, 00yyyyyy, 00zzzzzz back in their respective components.
+        /// </summary>
+        private static uint3 UnMorton3(uint x) {
+            uint3 v = new uint3(x, x / 2, x / 4) & 0x9249;
+            v = (v | (v >> 2)) & 0x30C3;
+            v = (v | (v >> 4)) & 0x300F;
+            v = (v | (v >> 8)) &   0x3F;
+            return v;
         }
     }
 }

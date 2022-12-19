@@ -4,14 +4,18 @@
 
 // See also the Chunk.Vertex struct over in c#-land's Chunk.cs.
 struct appdata {
-    // Position ∈ {0, .., 32}^3 × voxel material reintp't as float
-    float4 data : POSITION;
+    // Contained in the factors, you get:
+    //   #1: factor 33: x-position 0, .., 32
+    //   #2: factor 33: y-position 0, .., 32
+    //   #3: factor 33: z-position 0, .., 32
+    //   #4: remainder:   material 0, .., 119513
+    uint data : BLENDINDICES;
 };
 
 struct v2f {
     float4 vertex : SV_POSITION;
     float4 vertex_object_space : TEXCOORD0;
-    float4 vertex_world_space : TEXCOORD1;
+    float3 vertex_world_space : TEXCOORD1;
     nointerpolation uint material : TEXCOORD2;
 };
 
@@ -21,8 +25,16 @@ float4 _MainTex_ST;
 v2f vert (appdata v) {
     v2f o;
     // Unpack
-    o.vertex_object_space = float4(v.data.xyz, 1);
-    o.material = asuint(v.data.w);
+    o.vertex_object_space.x = v.data % 33;
+    v.data /= 33;
+    o.vertex_object_space.y = v.data % 33;
+    v.data /= 33;
+    o.vertex_object_space.z = v.data % 33;
+    v.data /= 33;
+    o.vertex_object_space.w = 1;
+
+    o.material = v.data;
+
     // And prep for the frag shader
     o.vertex = UnityObjectToClipPos(o.vertex_object_space);
     o.vertex_world_space = mul(unity_ObjectToWorld, o.vertex_object_space);
@@ -39,7 +51,7 @@ fixed4 frag (v2f i) : SV_Target {
     //  ddx when looking at it from straight ahead. We can't have both unstable
     //  at the same time.)
     float3 frac_obj_space = frac(i.vertex_object_space);
-    int3 flat = (ddx(frac_obj_space) * ddy(frac_obj_space)) == 0;
+    int3 flat = (ddx(frac_obj_space) == 0) * (ddy(frac_obj_space) == 0);
     float2 uv;
     if (flat.z)
         uv = frac_obj_space.xy;
