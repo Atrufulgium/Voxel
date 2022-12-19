@@ -14,8 +14,8 @@ namespace Atrufulgium.Voxel {
             baseChunk = new(0);
             foreach((int3 pos, ushort _) in baseChunk) {
                 int val = (pos.x - 16) * (pos.x - 16) + (pos.z - 16) * (pos.z - 16);
-                if (val < 450 - 16*pos.y && val > 400 - 16 * pos.y)
-                    baseChunk[pos] = 1;
+                if (val < 450 - 16*pos.y)
+                    baseChunk[pos] = (ushort)(val > 400 - 16 * pos.y ? 10 : 21);
             }
         }
 
@@ -23,8 +23,10 @@ namespace Atrufulgium.Voxel {
         public int LoD;
 
         private void OnValidate() {
-            if (Application.isPlaying)
-                meshFilter.mesh = baseChunk.WithLoD(LoD).GetMesh(0);
+            if (baseChunk.voxels == null)
+                Awake();
+
+            meshFilter.mesh = baseChunk.WithLoD(LoD).GetMesh(0);
         }
     }
 }

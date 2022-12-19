@@ -10,7 +10,7 @@ namespace Atrufulgium.Voxel.Base {
 
     /// <summary>
     /// Represents a 32x32x32 cube of voxels.
-    /// The voxel values are ushorts.
+    /// The voxel materials are ushorts.
     /// </summary>
     // This current state is of course very naive.
     // Cache-friendlier would be a massive array that can be walked (with pre-
@@ -28,6 +28,8 @@ namespace Atrufulgium.Voxel.Base {
         public int VoxelsPerAxis => 32 >> LoD;
         public int VoxelSize => 1 << LoD;
         public readonly ushort[] voxels;
+
+        static Unity.Mathematics.Random rng = new(230);
 
         /// <summary>
         /// Creates a new empty chunk with specified LoD.
@@ -56,7 +58,7 @@ namespace Atrufulgium.Voxel.Base {
         /// </para>
         /// <para>
         /// If the new LoD is worse(=higher), it will set the larger voxels to
-        /// be the first of the cell. (Todo: most common one?)
+        /// be (in stochastic expectation) the most common material.
         /// </para>
         /// <para>
         /// If the new LoD is better(=lower), it will upscale exactly as-is.
@@ -80,10 +82,15 @@ namespace Atrufulgium.Voxel.Base {
                 return newChunk;
             } else {
                 // Less detail
-                // (You may want to pull `oldStepSize` into the above branch,
-                //  but more sophisticated methods will use it here also.)
-                foreach((int3 coord, ushort _) in newChunk)
-                    newChunk[coord] = this[coord];
+                foreach ((int3 coord, ushort _) in newChunk) {
+                    // Sample three random voxels in the part that gets downscaled.
+                    ushort material = MajorityVote(
+                        this[rng.NextInt3(newVoxelSize) + coord],
+                        this[rng.NextInt3(newVoxelSize) + coord],
+                        this[rng.NextInt3(newVoxelSize) + coord]
+                    );
+                    newChunk[coord] = material;
+                }
                 return newChunk;
             }
         }
@@ -114,12 +121,9 @@ namespace Atrufulgium.Voxel.Base {
         /// <list type="bullet">
         /// <item> Has <b>no</b> normals. Voxels are simple, these can be
         /// derived easily in shaders. </item>
-        /// <item> Has (positive) uvs such that uvs mod one correspond to a
-        /// single voxel. </item>
-        /// <item> Uses vertex colours for the voxel value, divided by 32768.
-        /// As the float mantissa is 23 bits, this is exact. </item>
+        /// <item> Has <b>no</b> uvs. Again, these can be derived in shaders. </item>
+        /// <item> Uses the position's w-value for the voxel material. </item>
         /// </list>
-        /// The last two are compressed into one though, to unpack on the GPU.
         /// </para>
         /// <para>
         /// Any face whose normals would be opposite to <paramref name="viewDir"/>
@@ -140,24 +144,25 @@ namespace Atrufulgium.Voxel.Base {
 
                 int index = vertices.Count;
                 foreach (int3 corner in Enumerators.EnumerateVolume(new int3(2,2,2))) {
-                    // TODO: uvs ofc
-                    vertices.Add(new(coord + corner * VoxelSize, 0, material));
+                    vertices.Add(new(coord + corner * VoxelSize, material));
                 }
-                foreach (var tri in cubeQuads)
-                    quads.Add((ushort)(tri + index));
+                foreach (var quad in cubeQuads)
+                    quads.Add((ushort)(quad + index));
             }
 
             var mesh = new Mesh();
             mesh.SetVertexBufferParams(vertices.Count, Layout);
-            mesh.SetVertexBufferData(vertices, 0, 0, vertices.Count, flags: (MeshUpdateFlags)/*15*/0);
+            mesh.SetVertexBufferData(vertices, 0, 0, vertices.Count, flags: (MeshUpdateFlags)15);
 
             mesh.SetIndexBufferParams(quads.Count, IndexFormat.UInt16);
-            mesh.SetIndexBufferData(quads, 0, 0, quads.Count, flags: 0);
+            mesh.SetIndexBufferData(quads, 0, 0, quads.Count, flags: (MeshUpdateFlags)15);
 
             mesh.subMeshCount = 1;
             // Do note: The docs (<=5.4 already though) note that quads are
             // often emulated. Is this still the case?
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, quads.Count, MeshTopology.Quads), flags: 0);
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, quads.Count, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
+
+            mesh.bounds = new(new(16, 16, 16), new(32, 32, 32));
 
             return mesh;
         }
@@ -165,34 +170,20 @@ namespace Atrufulgium.Voxel.Base {
         /// <summary>
         /// See the documentation of <see cref="GetMesh(int3)"/>
         /// </summary>
-        /// <remarks>
-        /// The uvs are integer, with each coord being one of {0, 1, .. 32}.
-        /// This takes up 12 bits in total. The actual voxel value is a ushort,
-        /// taking up 16 bits. This fits within the 32 bits of a single float,
-        /// which can be unpacked on the GPU side. Packing format:
-        /// <code>
-        ///     msb    __YY YYYY __XX XXXX VVVV VVVV VVVV VVVV    lsb
-        ///               uv-y      uv-x       voxel value
-        /// </code>
-        /// </remarks>
-        [StructLayout(LayoutKind.Sequential)]
         struct Vertex {
-            public float3 pos;
-            public int color;
+            public float4 pos;
 
-            public Vertex(float3 pos, int2 uv, ushort value) {
-                this.pos = pos;
-                color = value + (uv.x << 16) + (uv.y << 24);
+            public Vertex(float3 pos, ushort material) {
+                this.pos = new float4(pos, math.asfloat((uint)material));
             }
         }
-        static VertexAttributeDescriptor[] Layout = new VertexAttributeDescriptor[] {
-            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
-            new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.SInt32, 1)
+        static readonly VertexAttributeDescriptor[] Layout = new VertexAttributeDescriptor[] {
+            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 4)
         };
 
         /// <summary>
         /// Iterates over all voxels in this chunk and returns a
-        /// (position, value)-tuple at each iteration. The position
+        /// (position, material)-tuple at each iteration. The position
         /// refers to the smallest corner of each voxel.
         /// </summary>
         public IEnumerator<(int3, ushort)> GetEnumerator() {
@@ -204,5 +195,16 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        /// <summary>
+        /// Returns a most common value of three values.
+        /// </summary>
+        private ushort MajorityVote(ushort a, ushort b, ushort c) {
+            // This account for the (a,a,a) and (a,a,c) cases.
+            if (a == b)
+                return a;
+            // This accounts for the (a,c,c), (c,b,c), and (a,b,c) cases.
+            return c;
+        }
     }
 }
