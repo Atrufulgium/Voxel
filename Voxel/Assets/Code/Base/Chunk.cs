@@ -116,28 +116,78 @@ namespace Atrufulgium.Voxel.Base {
         /// </para>
         /// <para>
         /// Any face whose normals would be opposite to <paramref name="viewDir"/>
-        /// are culled at this step already.
+        /// are culled at this step already. Pass the zero-vector to cull nothing.
         /// </para>
         /// </summary>
-        public Mesh GetMesh(int3 viewDir) {
+        // TODO: proper tl;dr of https://doi.org/10.1137/0402027
+        // Note that we also have a "don't care" region in nearly all planes as
+        // we don't care what covered voxels do. Taking into account OPT in
+        // this case seems nearly impossible.
+        public Mesh GetMesh(float3 viewDir) {
             // lmao the worst of the worst but hey, testing.
             // Yes I'm not even collapsing verts.
             List<Vertex> vertices = new();
+            Dictionary<Vertex, int> vertToIndex = new();
             // Ushorts are fine - there are at most 33*33*33 vertices.
             // Update: These are not fine, because there may be multiple materials.
             List<ushort> quads = new();
-            //temp ofc lol
-            ushort[] cubeQuads = new ushort[] { 5, 7, 6, 4, 2, 6, 7, 3, 3, 7, 5, 1, 1, 5, 4, 0, 0, 4, 6, 2, 2, 3, 1, 0 };
-            foreach((int3 coord, ushort material) in this) {
-                if (material == 0)
-                    continue;
 
-                int index = vertices.Count;
-                foreach (int3 corner in Enumerators.EnumerateVolume(new int3(2,2,2))) {
-                    vertices.Add(new(coord + corner * VoxelSize, material));
+            // For now assuming only air vs non-air for simplicity, and doing just one axis one-sided.
+            int voxelSize = VoxelSize;
+            int x, y, z;
+            Dictionary<RectInt, RectInt> rects = new(new RectHorizontalOnlyComparer());
+            
+            for (z = 0; z < 32; z += voxelSize) {
+                // Considering a single XY-plane, first partition into vertical
+                // rectangles. Rectangles are allowed to go under other voxels
+                // in another layer.
+                rects.Clear();
+                for (y = 0; y < 32; y += voxelSize) {
+                    RectInt current = default;
+                    for (x = 0; x < 32; x+= voxelSize) {
+                        // We're not air
+                        bool air = this[new(x, y, z)] == 0;
+                        // We're covered by the previous layer
+                        bool covered = z > 0 && this[new(x, y, z - voxelSize)] != 0;
+
+                        if ((!air && !covered) && current.height == 0) {
+                            // We're newly available.
+                            current = new(x, y, 0, VoxelSize);
+                        } else if (air && !covered && current.height != 0) {
+                            // We're no longer available.
+                            current.width = x - current.xMin;
+                            if (rects.ContainsKey(current)) {
+                                var old = rects[current];
+                                old.height = current.yMin + voxelSize - old.yMin;
+                                rects[current] = old;
+                            } else {
+                                rects.Add(current, current);
+                            }
+                            current = default;
+                        }
+                    }
+                    if (current.height != 0) {
+                        // We're no longer available due to chunk edge.
+                        current.width = 32 - current.xMin;
+                        if (rects.ContainsKey(current)) {
+                            var old = rects[current];
+                            old.height += voxelSize;
+                            rects[current] = old;
+                        } else {
+                            rects.Add(current, current);
+                        }
+                    }
                 }
-                foreach (var quad in cubeQuads)
-                    quads.Add((ushort)(quad + index));
+                foreach(var (_, rect) in rects) {
+                    foreach (int2 corner in Enumerators.EnumerateCorners(rect)) {
+                        Vertex vert = new(new(corner, z), 1);
+                        if (!vertToIndex.TryGetValue(vert, out int index)) {
+                            index = vertices.Count;
+                            vertices.Add(vert);
+                        }
+                        quads.Add((ushort)index);
+                    }
+                }
             }
 
             var mesh = new Mesh();
@@ -162,7 +212,7 @@ namespace Atrufulgium.Voxel.Base {
         /// first three factors 33 the coordinate positions, and in the
         /// remaining [0,119513]-range the material.
         /// </summary>
-        struct Vertex {
+        struct Vertex : IEquatable<Vertex> {
             public uint data;
 
             /// <summary>
@@ -175,6 +225,9 @@ namespace Atrufulgium.Voxel.Base {
                     + 33u * 33u * (uint)pos.z
                     + 33u * 33u * 33u * material;
             }
+
+            bool IEquatable<Vertex>.Equals(Vertex other)
+                => data == other.data;
         }
         static readonly VertexAttributeDescriptor[] Layout = new VertexAttributeDescriptor[] {
             new VertexAttributeDescriptor(VertexAttribute.BlendIndices, VertexAttributeFormat.UInt32, 1)
@@ -234,6 +287,16 @@ namespace Atrufulgium.Voxel.Base {
             v = (v | (v >> 4)) & 0x300F;
             v = (v | (v >> 8)) &   0x3F;
             return v;
+        }
+
+        /// <summary>
+        /// A comparer only cares about (xMin, width).
+        /// </summary>
+        struct RectHorizontalOnlyComparer : IEqualityComparer<RectInt> {
+            bool IEqualityComparer<RectInt>.Equals(RectInt x, RectInt y)
+                => x.xMin == y.xMin && x.width == y.width;
+            int IEqualityComparer<RectInt>.GetHashCode(RectInt obj)
+                => (obj.xMin, obj.width).GetHashCode();
         }
     }
 }

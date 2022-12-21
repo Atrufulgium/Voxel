@@ -13,9 +13,12 @@ namespace Atrufulgium.Voxel {
 
             baseChunk = new(0);
             foreach((int3 pos, ushort _) in baseChunk) {
-                int val = (pos.x - 16) * (pos.x - 16) + (pos.z - 16) * (pos.z - 16);
-                if (val < 450 - 16*pos.y)
-                    baseChunk[pos] = (ushort)(val > 400 - 16 * pos.y ? 10 : 21);
+                //int val = (pos.x - 16) * (pos.x - 16) + (pos.z - 16) * (pos.z - 16);
+                //if (val < 450 - 16*pos.y)
+                //    baseChunk[pos] = (ushort)(val > 400 - 16 * pos.y ? 1 : 2);
+                float val = math.lengthsq(pos - 16);
+                if (val < 250)
+                    baseChunk[pos] = 1;
             }
         }
 

@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace Atrufulgium.Voxel.Base {
     internal static class Enumerators {
@@ -21,6 +22,16 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         public static IEnumerable<int3> EnumerateVolume(int3 max)
             => EnumerateVolume(max, new int3(1, 1, 1));
+
+        /// <summary>
+        /// Iterates the corners of the rectangle in clockwise order.
+        /// </summary>
+        public static IEnumerable<int2> EnumerateCorners(RectInt rect) {
+            yield return new(rect.xMin, rect.yMin);
+            yield return new(rect.xMin, rect.yMax);
+            yield return new(rect.xMax, rect.yMax);
+            yield return new(rect.xMax, rect.yMin);
+        }
 
         /// <summary>
         /// Iterates over all elements in a copy of ts.
