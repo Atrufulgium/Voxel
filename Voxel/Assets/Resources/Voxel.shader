@@ -10,6 +10,8 @@ Shader "Custom/Voxel"
 
         Pass
         {
+            Cull Back
+
             CGPROGRAM
             #include "VoxelContent.cginc"
             ENDCG

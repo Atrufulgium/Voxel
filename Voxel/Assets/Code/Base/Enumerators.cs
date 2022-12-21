@@ -26,11 +26,21 @@ namespace Atrufulgium.Voxel.Base {
         /// <summary>
         /// Iterates the corners of the rectangle in clockwise order.
         /// </summary>
-        public static IEnumerable<int2> EnumerateCorners(RectInt rect) {
+        public static IEnumerable<int2> EnumerateCornersClockwise(RectInt rect) {
             yield return new(rect.xMin, rect.yMin);
             yield return new(rect.xMin, rect.yMax);
             yield return new(rect.xMax, rect.yMax);
             yield return new(rect.xMax, rect.yMin);
+        }
+
+        /// <summary>
+        /// Iterates the corners of the rectangle in counterclockwise order.
+        /// </summary>
+        public static IEnumerable<int2> EnumerateCornersCounterclockwise(RectInt rect) {
+            yield return new(rect.xMax, rect.yMin);
+            yield return new(rect.xMax, rect.yMax);
+            yield return new(rect.xMin, rect.yMax);
+            yield return new(rect.xMin, rect.yMin);
         }
 
         /// <summary>

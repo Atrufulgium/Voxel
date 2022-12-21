@@ -85,6 +85,8 @@ namespace Atrufulgium.Voxel.Base {
                 // Less detail
                 foreach ((int3 coord, ushort _) in newChunk) {
                     // Sample three random voxels in the part that gets downscaled.
+                    // TODO: Can get pretty far apart voxels with few cache
+                    // misses by abusing the Z-curve's structure.
                     ushort material = MajorityVote(
                         this[rng.NextInt3(newVoxelSize) + coord],
                         this[rng.NextInt3(newVoxelSize) + coord],
@@ -117,6 +119,8 @@ namespace Atrufulgium.Voxel.Base {
         /// <para>
         /// Any face whose normals would be opposite to <paramref name="viewDir"/>
         /// are culled at this step already. Pass the zero-vector to cull nothing.
+        /// Note that to use this, you need to not only consider the camera
+        /// direction, but also the object's transform.
         /// </para>
         /// </summary>
         // TODO: proper tl;dr of https://doi.org/10.1137/0402027
@@ -124,19 +128,26 @@ namespace Atrufulgium.Voxel.Base {
         // we don't care what covered voxels do. Taking into account OPT in
         // this case seems nearly impossible.
         public Mesh GetMesh(float3 viewDir) {
-            // lmao the worst of the worst but hey, testing.
-            // Yes I'm not even collapsing verts.
             List<Vertex> vertices = new();
             Dictionary<Vertex, int> vertToIndex = new();
             // Ushorts are fine - there are at most 33*33*33 vertices.
             // Update: These are not fine, because there may be multiple materials.
+            // However, it only goes wrong with for instance a 28x28x28
+            // checkerboard pattern of "air / non-air" with no two diagonally
+            // touching non-air blocks the same material. This is naturally
+            // *highly* specific. If anyone places ~11k blocks by hand in a
+            // "place two break one"-way, they *deserve* the broken physics and
+            // graphics they want.
             List<ushort> quads = new();
+            // This would be so much better with an interval tree.
+            // I *will* implement those someday for RLE, so I guess,
+            // TODO: replace with interval tree.
+            Dictionary<RectInt, RectInt> rects = new(new RectHorizontalOnlyComparer());
+
 
             // For now assuming only air vs non-air for simplicity, and doing just one axis one-sided.
             int voxelSize = VoxelSize;
             int x, y, z;
-            Dictionary<RectInt, RectInt> rects = new(new RectHorizontalOnlyComparer());
-            
             for (z = 0; z < 32; z += voxelSize) {
                 // Considering a single XY-plane, first partition into vertical
                 // rectangles. Rectangles are allowed to go under other voxels
@@ -144,42 +155,40 @@ namespace Atrufulgium.Voxel.Base {
                 rects.Clear();
                 for (y = 0; y < 32; y += voxelSize) {
                     RectInt current = default;
-                    for (x = 0; x < 32; x+= voxelSize) {
+                    for (x = 0; x < 33; x+= voxelSize) {
+                        // We're at the end of the chunk and can't do anything
+                        // but add a possible WIP rect.
+                        bool final = x == 32;
                         // We're not air
-                        bool air = this[new(x, y, z)] == 0;
+                        bool air = !final && this[new(x, y, z)] == 0;
                         // We're covered by the previous layer
-                        bool covered = z > 0 && this[new(x, y, z - voxelSize)] != 0;
+                        bool covered = !final && z > 0 && this[new(x, y, z - voxelSize)] != 0;
 
-                        if ((!air && !covered) && current.height == 0) {
-                            // We're newly available.
+                        if (!air && !covered && current.height == 0) {
+                            // We're newly available. (!final is implicit.)
                             current = new(x, y, 0, VoxelSize);
-                        } else if (air && !covered && current.height != 0) {
+                        } else if ((air && !covered && current.height != 0) || final) {
                             // We're no longer available.
                             current.width = x - current.xMin;
                             if (rects.ContainsKey(current)) {
+                                // As noted below, the key's equality is not
+                                // transitive. This is an ugly hack, but this
+                                // code *needs* it to be somewhat decent still.
+                                // So we need to actually pop the (key,value)-
+                                // pair and insert one that *looks* the same.
+                                // Yes, this is massive dict-abuse.
                                 var old = rects[current];
+                                rects.Remove(current);
                                 old.height = current.yMin + voxelSize - old.yMin;
-                                rects[current] = old;
-                            } else {
-                                rects.Add(current, current);
+                                current = old;
                             }
-                            current = default;
-                        }
-                    }
-                    if (current.height != 0) {
-                        // We're no longer available due to chunk edge.
-                        current.width = 32 - current.xMin;
-                        if (rects.ContainsKey(current)) {
-                            var old = rects[current];
-                            old.height += voxelSize;
-                            rects[current] = old;
-                        } else {
                             rects.Add(current, current);
+                            current = default;
                         }
                     }
                 }
                 foreach(var (_, rect) in rects) {
-                    foreach (int2 corner in Enumerators.EnumerateCorners(rect)) {
+                    foreach (int2 corner in Enumerators.EnumerateCornersClockwise(rect)) {
                         Vertex vert = new(new(corner, z), 1);
                         if (!vertToIndex.TryGetValue(vert, out int index)) {
                             index = vertices.Count;
@@ -252,7 +261,7 @@ namespace Atrufulgium.Voxel.Base {
         /// Returns a most common value of three values.
         /// </summary>
         private ushort MajorityVote(ushort a, ushort b, ushort c) {
-            // This account for the (a,a,a) and (a,a,c) cases.
+            // This accounts for the (a,a,a) and (a,a,c) cases.
             if (a == b)
                 return a;
             // This accounts for the (a,c,c), (c,b,c), and (a,b,c) cases.
@@ -290,11 +299,19 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         /// <summary>
-        /// A comparer only cares about (xMin, width).
+        /// <para>
+        /// A comparer only cares about (xMin, width), and the two being
+        /// vertically apart by at most one.
+        /// </para>
+        /// <para>
+        /// Note!!! This equality is NOT transitive! This breaks a bunch of
+        /// shit you usually wouldn't think about.
+        /// </para>
         /// </summary>
         struct RectHorizontalOnlyComparer : IEqualityComparer<RectInt> {
             bool IEqualityComparer<RectInt>.Equals(RectInt x, RectInt y)
-                => x.xMin == y.xMin && x.width == y.width;
+                => x.xMin == y.xMin && x.width == y.width
+                && (x.yMin == y.yMax || x.yMax == y.yMin);
             int IEqualityComparer<RectInt>.GetHashCode(RectInt obj)
                 => (obj.xMin, obj.width).GetHashCode();
         }

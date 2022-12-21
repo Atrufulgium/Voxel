@@ -17,7 +17,8 @@ namespace Atrufulgium.Voxel {
                 //if (val < 450 - 16*pos.y)
                 //    baseChunk[pos] = (ushort)(val > 400 - 16 * pos.y ? 1 : 2);
                 float val = math.lengthsq(pos - 16);
-                if (val < 250)
+                float val2 = math.lengthsq(pos.xy - 16);
+                if (val is < 250 && val2 > 10)
                     baseChunk[pos] = 1;
             }
         }
