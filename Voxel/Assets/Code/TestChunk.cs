@@ -30,7 +30,7 @@ namespace Atrufulgium.Voxel {
             if (baseChunk.voxels == null)
                 Awake();
 
-            meshFilter.mesh = baseChunk.WithLoD(LoD).GetMesh(0);
+            meshFilter.mesh = baseChunk.WithLoD(LoD).GetMesh(math.normalize(new float3(1,1,1)));
         }
     }
 }

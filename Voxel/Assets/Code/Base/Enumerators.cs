@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -72,6 +73,13 @@ namespace Atrufulgium.Voxel.Base {
         public static IEnumerable<(T1, T2)> EnumerateTuple<T1, T2>((IEnumerable<T1>, IEnumerable<T2>) ts)
             => EnumerateTuple(ts.Item1, ts.Item2);
 
+        /// <inheritdoc cref="EnumerateTuple{T1, T2}(IEnumerable{T1}, IEnumerable{T2})"/>
+        public static IEnumerator<(T1, T2)> GetEnumerator<T1, T2>(this (IEnumerable<T1>, IEnumerable<T2>) ts) {
+            foreach (T1 t1 in ts.Item1)
+                foreach (T2 t2 in ts.Item2)
+                    yield return (t1, t2);
+        }
+
         /// <summary>
         /// Iterates over all triples in (T1,T2,T3).
         /// </summary>
@@ -85,6 +93,14 @@ namespace Atrufulgium.Voxel.Base {
         /// <inheritdoc cref="EnumerateTuple{T1, T2, T3}(IEnumerable{T1}, IEnumerable{T2}, IEnumerable{T3})"/>
         public static IEnumerable<(T1, T2, T3)> EnumerateTuple<T1, T2, T3>((IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>) ts)
             => EnumerateTuple(ts.Item1, ts.Item2, ts.Item3);
+
+        /// <inheritdoc cref="EnumerateTuple{T1, T2, T3}(IEnumerable{T1}, IEnumerable{T2}, IEnumerable{T3})"/>
+        public static IEnumerator<(T1, T2, T3)> GetEnumerator<T1, T2, T3>(this (IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>) ts) {
+            foreach (T1 t1 in ts.Item1)
+                foreach (T2 t2 in ts.Item2)
+                    foreach (T3 t3 in ts.Item3)
+                        yield return (t1, t2, t3);
+        }
 
         /// <summary>
         /// Iterates over all combinations in (T1,T2,T3,T4).
@@ -104,5 +120,14 @@ namespace Atrufulgium.Voxel.Base {
         /// <inheritdoc cref="EnumerateTuple{T1, T2, T3, T4}(IEnumerable{T1}, IEnumerable{T2}, IEnumerable{T3}, IEnumerable{T4})"/>
         public static IEnumerable<(T1, T2, T3, T4)> EnumerateTuple<T1, T2, T3, T4>((IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>, IEnumerable<T4>) ts)
             => EnumerateTuple(ts.Item1, ts.Item2, ts.Item3, ts.Item4);
+
+        /// <inheritdoc cref="EnumerateTuple{T1, T2, T3, T4}(IEnumerable{T1}, IEnumerable{T2}, IEnumerable{T3}, IEnumerable{T4})"/>
+        public static IEnumerator<(T1, T2, T3, T4)> GetEnumerator<T1, T2, T3, T4>(this (IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>, IEnumerable<T4>) ts) {
+            foreach (T1 t1 in ts.Item1)
+                foreach (T2 t2 in ts.Item2)
+                    foreach (T3 t3 in ts.Item3)
+                        foreach (T4 t4 in ts.Item4)
+                            yield return (t1, t2, t3, t4);
+        }
     }
 }

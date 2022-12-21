@@ -123,6 +123,7 @@ namespace Atrufulgium.Voxel.Base {
         /// direction, but also the object's transform.
         /// </para>
         /// </summary>
+        // Note that a camera looking at positive z has positive z transform.forward.
         // TODO: proper tl;dr of https://doi.org/10.1137/0402027
         // Note that we also have a "don't care" region in nearly all planes as
         // we don't care what covered voxels do. Taking into account OPT in
@@ -143,26 +144,73 @@ namespace Atrufulgium.Voxel.Base {
             // I *will* implement those someday for RLE, so I guess,
             // TODO: replace with interval tree.
             Dictionary<RectInt, RectInt> rects = new(new RectHorizontalOnlyComparer());
+            foreach ((var layerToCoord, var backside) in renderDirections) {
+                // TODO: This is probably incorrect for the same reason as on
+                // the GPU side - it doesn't take into account the perspective
+                // transformation.
+                int3 normal = layerToCoord(0, 0, 1);
+                if (!backside)
+                    normal *= -1;
+                if (math.dot(viewDir, normal) >= 0)
+                    GetMeshFromDirection(vertices, vertToIndex, quads, rects, layerToCoord, backside);
+            }
 
+            var mesh = new Mesh();
+            mesh.SetVertexBufferParams(vertices.Count, Layout);
+            mesh.SetVertexBufferData(vertices, 0, 0, vertices.Count, flags: (MeshUpdateFlags)15);
 
+            mesh.SetIndexBufferParams(quads.Count, IndexFormat.UInt16);
+            mesh.SetIndexBufferData(quads, 0, 0, quads.Count, flags: (MeshUpdateFlags)15);
+
+            mesh.subMeshCount = 1;
+            // Do note: The docs (<=5.4 already though) note that quads are
+            // often emulated. Is this still the case?
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, quads.Count, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
+
+            mesh.bounds = new(new(16, 16, 16), new(32, 32, 32));
+
+            return mesh;
+        }
+
+        private static int3 LayerToCoordX(int x, int y, int layer) => new(x, y, layer);
+        private static int3 LayerToCoordY(int x, int y, int layer) => new(y, layer, x);
+        private static int3 LayerToCoordZ(int x, int y, int layer) => new(layer, x, y);
+
+        private static readonly IEnumerable<(Func<int, int, int, int3>, bool)> renderDirections = Enumerators.EnumerateTuple(
+            new Func<int, int, int, int3>[] { LayerToCoordX, LayerToCoordY, LayerToCoordZ },
+            new[] { true, false }
+        );
+
+        private void GetMeshFromDirection(
+            List<Vertex> vertices,
+            Dictionary<Vertex, int> vertToIndex,
+            List<ushort> quads,
+            Dictionary<RectInt, RectInt> rects,
+            Func<int, int, int, int3> layerToCoord,
+            bool backside
+        ) {
             // For now assuming only air vs non-air for simplicity, and doing just one axis one-sided.
             int voxelSize = VoxelSize;
-            int x, y, z;
-            for (z = 0; z < 32; z += voxelSize) {
+            int x, y, layer;
+            for (layer = 0; layer < 32; layer += voxelSize) {
                 // Considering a single XY-plane, first partition into vertical
                 // rectangles. Rectangles are allowed to go under other voxels
                 // in another layer.
                 rects.Clear();
                 for (y = 0; y < 32; y += voxelSize) {
                     RectInt current = default;
-                    for (x = 0; x < 33; x+= voxelSize) {
+                    for (x = 0; x < 33; x += voxelSize) {
                         // We're at the end of the chunk and can't do anything
                         // but add a possible WIP rect.
                         bool final = x == 32;
                         // We're not air
-                        bool air = !final && this[new(x, y, z)] == 0;
+                        bool air = !final && this[layerToCoord(x, y, layer)] == 0;
                         // We're covered by the previous layer
-                        bool covered = !final && z > 0 && this[new(x, y, z - voxelSize)] != 0;
+                        bool covered;
+                        if (backside)
+                            covered = !final && layer > 0 && this[layerToCoord(x, y, layer - voxelSize)] != 0;
+                        else
+                            covered = !final && layer + voxelSize < 32 && this[layerToCoord(x, y, layer + voxelSize)] != 0;
 
                         if (!air && !covered && current.height == 0) {
                             // We're newly available. (!final is implicit.)
@@ -187,9 +235,19 @@ namespace Atrufulgium.Voxel.Base {
                         }
                     }
                 }
-                foreach(var (_, rect) in rects) {
-                    foreach (int2 corner in Enumerators.EnumerateCornersClockwise(rect)) {
-                        Vertex vert = new(new(corner, z), 1);
+                foreach (var (_, rect) in rects) {
+                    IEnumerable<int2> corners;
+                    if (backside)
+                        corners = Enumerators.EnumerateCornersClockwise(rect);
+                    else
+                        corners = Enumerators.EnumerateCornersCounterclockwise(rect);
+
+                    foreach (int2 corner in corners) {
+                        Vertex vert;
+                        if (backside)
+                            vert = new(layerToCoord(corner.x, corner.y, layer), 1);
+                        else
+                            vert = new(layerToCoord(corner.x, corner.y, layer + voxelSize), 1);
                         if (!vertToIndex.TryGetValue(vert, out int index)) {
                             index = vertices.Count;
                             vertices.Add(vert);
@@ -198,22 +256,6 @@ namespace Atrufulgium.Voxel.Base {
                     }
                 }
             }
-
-            var mesh = new Mesh();
-            mesh.SetVertexBufferParams(vertices.Count, Layout);
-            mesh.SetVertexBufferData(vertices, 0, 0, vertices.Count, flags: (MeshUpdateFlags)15);
-
-            mesh.SetIndexBufferParams(quads.Count, IndexFormat.UInt16);
-            mesh.SetIndexBufferData(quads, 0, 0, quads.Count, flags: (MeshUpdateFlags)15);
-
-            mesh.subMeshCount = 1;
-            // Do note: The docs (<=5.4 already though) note that quads are
-            // often emulated. Is this still the case?
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, quads.Count, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
-
-            mesh.bounds = new(new(16, 16, 16), new(32, 32, 32));
-
-            return mesh;
         }
 
         /// <summary>
