@@ -49,8 +49,8 @@ namespace Atrufulgium.Voxel.Base {
         /// it reads/affects the larger voxels.
         /// </summary>
         public ushort this[int3 coord] { 
-            get => voxels[CoordToIndex(coord)];
-            set => voxels[CoordToIndex(coord)] = value;
+            get => voxels[CoordToIndexMorton3(coord)];
+            set => voxels[CoordToIndexMorton3(coord)] = value;
         }
 
         /// <summary>
@@ -97,22 +97,16 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         // These are brute-force checked over all (LoD,pos)'s.
-        public int CoordToIndex(int3 coord) {
+        public int CoordToIndexMorton3(int3 coord) {
             coord >>= LoD;
-            int inverseLod = 5 - LoD;
-            coord.x <<= 2 * inverseLod;
-            coord.y <<= inverseLod;
-            return coord.x + coord.y + coord.z;
+            // Note that Morton does coords in order {0,1}^3, {0,..,3}^3,
+            // {0,..,7}^3, etc. As such, it is justified to use Morton also
+            // for the higher LoDs.
+            return Morton3(coord);
         }
 
-        public int3 IndexToCoord(int index) {
-            int inverseLod = 5 - LoD;
-            int3 coord = new(
-                index >> 2 * inverseLod,
-                index >> inverseLod,
-                index
-            );
-            coord %= (1 << inverseLod);
+        public int3 IndexToCoordMorton3(int index) {
+            int3 coord = UnMorton3(index);
             return coord << LoD;
         }
 
@@ -130,6 +124,7 @@ namespace Atrufulgium.Voxel.Base {
             // Yes I'm not even collapsing verts.
             List<Vertex> vertices = new();
             // Ushorts are fine - there are at most 33*33*33 vertices.
+            // Update: These are not fine, because there may be multiple materials.
             List<ushort> quads = new();
             //temp ofc lol
             ushort[] cubeQuads = new ushort[] { 5, 7, 6, 4, 2, 6, 7, 3, 3, 7, 5, 1, 1, 5, 4, 0, 0, 4, 6, 2, 2, 3, 1, 0 };
@@ -219,7 +214,7 @@ namespace Atrufulgium.Voxel.Base {
         /// new number ..xyzxyz. All arguments must fit in 6 bits and this is
         /// not checked.
         /// </summary>
-        private static uint Morton3(uint3 v) {
+        private static int Morton3(int3 v) {
             // Each line, copy v over and mask to turn e.g. 0000abcd into
             // abcdabcd and then mask into ab0000cd. Then b,d are correct.
             // Really, just write it out on paper, that's easier to grasp.
@@ -233,8 +228,8 @@ namespace Atrufulgium.Voxel.Base {
         /// Given an interleaved bit pattern ..xyzxyz, restores 6-bit patterns
         /// 00xxxxxx, 00yyyyyy, 00zzzzzz back in their respective components.
         /// </summary>
-        private static uint3 UnMorton3(uint x) {
-            uint3 v = new uint3(x, x / 2, x / 4) & 0x9249;
+        private static int3 UnMorton3(int x) {
+            int3 v = new int3(x, x / 2, x / 4) & 0x9249;
             v = (v | (v >> 2)) & 0x30C3;
             v = (v | (v >> 4)) & 0x300F;
             v = (v | (v >> 8)) &   0x3F;
