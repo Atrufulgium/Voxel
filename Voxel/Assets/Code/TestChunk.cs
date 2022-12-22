@@ -7,9 +7,11 @@ namespace Atrufulgium.Voxel {
     internal class TestChunk : MonoBehaviour {
         Chunk baseChunk;
         MeshFilter meshFilter;
+        ChunkMesher mesher;
 
         private void Awake() {
             meshFilter = GetComponent<MeshFilter>();
+            mesher = new();
 
             baseChunk = new(0);
             foreach((int3 pos, ushort _) in baseChunk) {
@@ -19,7 +21,7 @@ namespace Atrufulgium.Voxel {
                 float val = math.lengthsq(pos - 16);
                 float val2 = math.lengthsq(pos.xy - 16);
                 if (val is < 250 && val2 > 10)
-                    baseChunk[pos] = 1;
+                    baseChunk[pos] = (ushort) ((pos.x & 2) == 0 ? 1 : 2);
             }
         }
 
@@ -30,7 +32,7 @@ namespace Atrufulgium.Voxel {
             if (baseChunk.voxels == null)
                 Awake();
 
-            meshFilter.mesh = baseChunk.WithLoD(LoD).GetMesh(math.normalize(new float3(1,1,1)));
+            meshFilter.mesh = mesher.GetMesh(baseChunk.WithLoD(LoD));
         }
     }
 }
