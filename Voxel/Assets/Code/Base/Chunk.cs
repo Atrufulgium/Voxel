@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine;
+using Unity.Collections;
 using Unity.Mathematics;
 
 namespace Atrufulgium.Voxel.Base {
@@ -16,7 +18,7 @@ namespace Atrufulgium.Voxel.Base {
     // For that, see also System.ArraySegment<T>.
     // More specifically, note https://0fps.net/2012/01/14/an-analysis-of-minecraft-like-engines/
     // Use virtual chunks and from the comments also z-curves.
-    public readonly struct Chunk : IEnumerable<(int3, ushort)> {
+    public struct Chunk : IEnumerable<(int3, ushort)>, IDisposable {
         /// <summary>
         /// A value [0,5] representing how much detail this chunk has.       <br/>
         /// A value of 0 represents a 32x32x32 cube with 1x1x1-sized voxels. <br/>
@@ -26,7 +28,7 @@ namespace Atrufulgium.Voxel.Base {
         public readonly int LoD;
         public int VoxelsPerAxis => 32 >> LoD;
         public int VoxelSize => 1 << LoD;
-        public readonly ushort[] voxels;
+        public NativeArray<ushort> voxels;
 
         /// <summary>
         /// Creates a new empty chunk with specified LoD.
@@ -37,7 +39,7 @@ namespace Atrufulgium.Voxel.Base {
 
             this.LoD = LoD;
             int size = 32 >> LoD;
-            voxels = new ushort[size*size*size];
+            voxels = new(size*size*size, Allocator.Persistent);
         }
 
         /// <summary>
@@ -143,6 +145,10 @@ namespace Atrufulgium.Voxel.Base {
             v = (v | (v >> 4)) & 0x300F;
             v = (v | (v >> 8)) &   0x3F;
             return v;
+        }
+
+        public void Dispose() {
+            voxels.Dispose();
         }
     }
 }

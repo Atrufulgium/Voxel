@@ -28,11 +28,29 @@ namespace Atrufulgium.Voxel {
         [Range(0, 5)]
         public int LoD;
 
+        private void Update() {
+            LoD += 1;
+            LoD %= 5;
+            if (LoD == 0)
+                LoD = 1;
+            for (int i = 0; i < 10; i++) {
+                using Chunk c = baseChunk.WithLoD(LoD);
+                meshFilter.mesh = mesher.GetMesh(c);
+            }
+
+        }
+
         private void OnValidate() {
-            if (baseChunk.voxels == null)
+            if (!baseChunk.voxels.IsCreated)
                 Awake();
 
-            meshFilter.mesh = mesher.GetMesh(baseChunk.WithLoD(LoD));
+            using Chunk c = baseChunk.WithLoD(LoD);
+            meshFilter.mesh = mesher.GetMesh(c);
+        }
+
+        private void OnDestroy() {
+            baseChunk.Dispose();
+            mesher.Dispose();
         }
     }
 }
