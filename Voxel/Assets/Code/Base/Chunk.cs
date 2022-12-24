@@ -1,3 +1,4 @@
+using Atrufulgium.Voxel.Collections;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -10,6 +11,11 @@ namespace Atrufulgium.Voxel.Base {
     /// Represents a 32x32x32 cube of voxels.
     /// The voxel materials are ushorts.
     /// </summary>
+    /// <remarks>
+    /// While this is technically a struct, the only thing you have write
+    /// access to is an unmanaged array, so feel free to just pass this around
+    /// as if this were a reference.
+    /// </remarks>
     // This current state is of course very naive.
     // Cache-friendlier would be a massive array that can be walked (with pre-
     // determined parts for each LoD size and also octtrees or something) to
@@ -27,7 +33,12 @@ namespace Atrufulgium.Voxel.Base {
         public readonly int LoD;
         public int VoxelsPerAxis => ChunkSize >> LoD;
         public int VoxelSize => 1 << LoD;
-        public NativeArray<ushort> voxels;
+        NativeArray<ushort> voxels;
+
+        /// <summary>
+        /// Whether the underlying NativeArray exists.
+        /// </summary>
+        public bool IsCreated => voxels.IsCreated;
 
         /// <summary>
         /// The chunks have width 2**ChunkExponent.

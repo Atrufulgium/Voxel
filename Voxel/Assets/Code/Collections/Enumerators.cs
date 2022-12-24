@@ -1,9 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.Collections {
     internal static class Enumerators {
 
         /// <summary>

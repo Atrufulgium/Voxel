@@ -15,7 +15,7 @@ namespace Atrufulgium.Voxel {
                 mesher.Dispose();
             mesher = new();
 
-            if (baseChunk.voxels.IsCreated)
+            if (baseChunk.IsCreated)
                 baseChunk.Dispose();
             baseChunk = new(0);
             foreach((int3 pos, ushort _) in baseChunk) {
@@ -45,7 +45,7 @@ namespace Atrufulgium.Voxel {
         }
 
         private void OnValidate() {
-            if (!baseChunk.voxels.IsCreated)
+            if (!baseChunk.IsCreated)
                 Awake();
 
             using Chunk c = baseChunk.WithLoD(LoD);
