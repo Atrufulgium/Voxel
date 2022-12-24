@@ -1,15 +1,19 @@
-﻿using AOT;
-using System;
-using UnityEngine;
-using Unity.Collections;
-using Unity.Mathematics;
-using UnityEngine.Rendering;
+﻿using System;
 using Unity.Burst;
+using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
+using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace Atrufulgium.Voxel.Base {
 
     public class ChunkMesher : IDisposable {
+
+        NativeList<Vertex> vertices = new(2 * (ushort.MaxValue + 1), Allocator.Persistent);
+        NativeList<ushort> quads = new(ushort.MaxValue + 1, Allocator.Persistent);
+        NativeParallelHashMap<Vertex, int> vertToIndex = new(ushort.MaxValue + 1, Allocator.Persistent);
+        NativeParallelHashMap<RectMaterialTuple, RectMaterialTuple> rects = new(64, Allocator.Persistent);
 
         /// <summary>
         /// <para>
@@ -45,8 +49,6 @@ namespace Atrufulgium.Voxel.Base {
                 viewDir = viewDir,
                 vertices = vertices,
                 quads = quads,
-                renderDirections = renderDirections,
-                allBools = allBools,
                 vertToIndex = vertToIndex,
                 rects = rects
             };
@@ -65,7 +67,11 @@ namespace Atrufulgium.Voxel.Base {
             // often emulated. Is this still the case?
             mesh.SetSubMesh(0, new SubMeshDescriptor(0, meshJob.quads.Length, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
 
-            mesh.bounds = new(new(16, 16, 16), new(32, 32, 32));
+            // Settings bounds sends an update mssage
+            mesh.bounds = new(
+                new(Chunk.ChunkSize/2, Chunk.ChunkSize/2, Chunk.ChunkSize/2),
+                new(Chunk.ChunkSize, Chunk.ChunkSize, Chunk.ChunkSize)
+            );
 
             return mesh;
         }
@@ -73,25 +79,9 @@ namespace Atrufulgium.Voxel.Base {
         public void Dispose() {
             vertices.Dispose();
             quads.Dispose();
-            renderDirections.Dispose();
-            allBools.Dispose();
             vertToIndex.Dispose();
             rects.Dispose();
         }
-
-        NativeList<Vertex> vertices = new(2 * (ushort.MaxValue + 1), Allocator.Persistent);
-        NativeList<ushort> quads = new(ushort.MaxValue + 1, Allocator.Persistent);
-        NativeArray<FunctionPointer<ChunkMesherJob.LayerToCoord>> renderDirections = new(renderDirectionsManaged, Allocator.Persistent);
-        NativeArray<bool> allBools = new(allBoolsManaged, Allocator.Persistent);
-        NativeParallelHashMap<Vertex, int> vertToIndex = new(ushort.MaxValue + 1, Allocator.Persistent);
-        NativeParallelHashMap<RectMaterialTuple, RectMaterialTuple> rects = new(64, Allocator.Persistent);
-
-        static FunctionPointer<ChunkMesherJob.LayerToCoord>[] renderDirectionsManaged = new[] {
-            BurstCompiler.CompileFunctionPointer<ChunkMesherJob.LayerToCoord>(ChunkMesherJob.LayerToCoordX),
-            BurstCompiler.CompileFunctionPointer<ChunkMesherJob.LayerToCoord>(ChunkMesherJob.LayerToCoordY),
-            BurstCompiler.CompileFunctionPointer<ChunkMesherJob.LayerToCoord>(ChunkMesherJob.LayerToCoordZ)
-        };
-        static bool[] allBoolsManaged = new[] { true, false };
     }
 
     [BurstCompile(CompileSynchronously = true)]
@@ -111,18 +101,6 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         [ReadOnly]
         internal float3 viewDir;
-        /// <summary>
-        /// The array { LayerToCoordX, LayerToCoordY, LayerToCoordZ }.
-        /// Required due to burst idiosyncrasies.
-        /// </summary>
-        [ReadOnly]
-        internal NativeArray<FunctionPointer<LayerToCoord>> renderDirections;
-        /// <summary>
-        /// The array { true, false }.
-        /// Required due to burst idosyncrasies.
-        /// </summary>
-        [ReadOnly]
-        internal NativeArray<bool> allBools;
 
         /// <summary>
         /// All verts in the current GetMesh call.
@@ -165,66 +143,66 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         int vertexCount;
 
+        static readonly LayerMode[] renderDirections = new[] { LayerMode.X, LayerMode.Y, LayerMode.Z };
+        static readonly bool[] allBools = new[] { true, false };
+
         // TODO: proper impl and tl;dr of https://doi.org/10.1137/0402027
         // Note that we also have a "don't care" region in nearly all planes as
         // we don't care what covered voxels do. Taking into account OPT in
         // this case seems nearly impossible.
         public void Execute() {
             vertexCount = 0;
-            foreach (var layerToCoord in renderDirections) {
-                foreach (var backside in allBools) {
+            for (int i = 0; i < 3; i++) {
+                for (int ii = 0; ii < 2; ii++) {
+                    var layerMode = renderDirections[i];
+                    var backside = allBools[ii];
                     // TODO: This is probably incorrect for the same reason as on
                     // the GPU side - it doesn't take into account the perspective
                     // transformation.
-                    int3 normal = default;
-                    layerToCoord.Invoke(0, 0, 1, ref normal);
+                    int3 normal = LayerToCoord(0, 0, 1, layerMode);
                     if (!backside)
                         normal *= -1;
                     if (math.dot(viewDir, normal) >= 0)
-                        GetMeshFromDirection(layerToCoord, backside);
+                        GetMeshFromDirection(layerMode, backside);
                 }
             }
         }
 
-        private void GetMeshFromDirection(
-            FunctionPointer<LayerToCoord> layerToCoord,
+        private unsafe void GetMeshFromDirection(
+            LayerMode layerMode,
             bool backside
         ) {
             int voxelSize = chunk.VoxelSize;
             int x, y, layer;
-            int3 output = default;
-            for (layer = 0; layer < 32; layer += voxelSize) {
+            for (layer = 0; layer < Chunk.ChunkSize; layer += voxelSize) {
                 // Considering a single XY-plane, first partition into vertical
                 // rectangles. Rectangles are allowed to go under other voxels
                 // in another layer. Grow those rectangles up if possible.
                 rects.Clear();
-                for (y = 0; y < 32; y += voxelSize) {
+                for (y = 0; y < Chunk.ChunkSize; y += voxelSize) {
                     RectInt current = default;
                     ushort currentMat = 0;
-                    for (x = 0; x < 33; x += voxelSize) {
+                    for (x = 0; x < Chunk.ChunkSize + 1; x += voxelSize) {
                         // We're at the end of the chunk and can't do anything
                         // but add a possible WIP rect.
-                        bool final = x == 32;
+                        bool final = x == Chunk.ChunkSize;
                         // We're different and need to change what we're doing.
                         bool different = false;
                         ushort mat = 0;
                         if (!final) {
-                            layerToCoord.Invoke(x, y, layer, ref output);
-                            mat = chunk[output];
+                            mat = chunk[LayerToCoord(x, y, layer, layerMode)];
                             different = mat != currentMat;
                         }
                         // We're covered by the previous layer and can do whatever
                         bool covered;
                         if (backside) {
-                            layerToCoord.Invoke(x, y, layer - voxelSize, ref output);
-                            covered = !final && layer > 0 && chunk[output] != 0;
+                            covered = !final && layer > 0 && chunk[LayerToCoord(x, y, layer - voxelSize, layerMode)] != 0;
                         } else {
-                            layerToCoord.Invoke(x, y, layer + voxelSize, ref output);
-                            covered = !final && layer + voxelSize < 32 && chunk[output] != 0;
+                            covered = !final && layer + voxelSize < Chunk.ChunkSize && chunk[LayerToCoord(x, y, layer + voxelSize, layerMode)] != 0;
                         }
 
                         // Commit the previous on differences. This automatically
-                        // commits changes on x=32 as that's always air.
+                        // commits changes on x=32 as that's always "air".
                         if ((different && !covered || final) && currentMat != 0) {
                             // We're no longer available.
                             current.width = x - current.xMin;
@@ -257,7 +235,7 @@ namespace Atrufulgium.Voxel.Base {
                 foreach (var kvpair in rects) {
                     var rect = kvpair.Value.rect;
                     var mat = kvpair.Value.mat;
-                    NativeArray<int2> corners = new(4, Allocator.Temp);
+                    int2* corners = stackalloc int2[4];
                     if (backside) {
                         corners[0] = new(rect.xMin, rect.yMin);
                         corners[1] = new(rect.xMin, rect.yMax);
@@ -270,15 +248,16 @@ namespace Atrufulgium.Voxel.Base {
                         corners[3] = new(rect.xMin, rect.yMin);
                     }
 
-                    foreach (int2 corner in corners) {
+                    for (int ci = 0; ci < 4; ci++) {
+                        int2 corner = corners[ci];
                         Vertex vert;
-                        if (backside) {
-                            layerToCoord.Invoke(corner.x, corner.y, layer, ref output);
-                            vert = new(output, mat);
-                        } else {
-                            layerToCoord.Invoke(corner.x, corner.y, layer + voxelSize, ref output);
-                            vert = new(output, mat);
+
+                        int z = layer;
+                        if (!backside) {
+                            z += voxelSize;
                         }
+                        vert = new(LayerToCoord(corner.x, corner.y, z, layerMode), mat);
+
                         if (!vertToIndex.TryGetValue(vert, out int index)) {
                             index = vertexCount;
                             vertexCount++;
@@ -286,22 +265,22 @@ namespace Atrufulgium.Voxel.Base {
                         }
                         quads.Add((ushort)index);
                     }
-                    corners.Dispose();
                 } // for rect
             } // for layer
         }
 
-        [BurstCompile]
-        [MonoPInvokeCallback(typeof(LayerToCoord))]
-        internal static void LayerToCoordX(int x, int y, int layer, ref int3 output) => output = new(x, y, layer);
-        [BurstCompile]
-        [MonoPInvokeCallback(typeof(LayerToCoord))]
-        internal static void LayerToCoordY(int x, int y, int layer, ref int3 output) => output = new(y, layer, x);
-        [BurstCompile]
-        [MonoPInvokeCallback(typeof(LayerToCoord))]
-        internal static void LayerToCoordZ(int x, int y, int layer, ref int3 output) => output = new(layer, x, y);
+        /// <summary>
+        /// Whether the X-, Y-, or Z-direction is constant.
+        /// </summary>
+        enum LayerMode { X, Y, Z };
 
-        internal delegate void LayerToCoord(int x, int y, int layer, ref int3 output);
+        private int3 LayerToCoord(int x, int y, int layer, LayerMode layerMode) {
+            if (layerMode == LayerMode.X)
+                return new(x, y, layer);
+            else if (layerMode == LayerMode.Y)
+                return new(y, layer, x);
+            return new(layer, x, y);
+        }
     }
 
     /// <summary>

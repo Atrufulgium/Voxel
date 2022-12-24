@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using Unity.Collections;
 using Unity.Mathematics;
 
@@ -26,19 +25,29 @@ namespace Atrufulgium.Voxel.Base {
         /// A value of 5 represents a 1x1x1 cube with 32x32x32-sized voxels.
         /// </summary>
         public readonly int LoD;
-        public int VoxelsPerAxis => 32 >> LoD;
+        public int VoxelsPerAxis => ChunkSize >> LoD;
         public int VoxelSize => 1 << LoD;
         public NativeArray<ushort> voxels;
+
+        /// <summary>
+        /// The chunks have width 2**ChunkExponent.
+        /// This may be at most 5.
+        /// </summary>
+        public const int ChunkExponent = 5;
+        /// <summary>
+        /// The chunk width.
+        /// </summary>
+        public const int ChunkSize = 1 << ChunkExponent;
 
         /// <summary>
         /// Creates a new empty chunk with specified LoD.
         /// </summary>
         public Chunk(int LoD) {
-            if (LoD is < 0 or > 5)
-                throw new ArgumentException("Only levels of detail 0--5 are allowed.", nameof(LoD));
+            if (LoD is < 0 or > ChunkExponent)
+                throw new ArgumentException($"Only levels of detail 0--{ChunkExponent} are allowed.", nameof(LoD));
 
             this.LoD = LoD;
-            int size = 32 >> LoD;
+            int size = ChunkSize >> LoD;
             voxels = new(size*size*size, Allocator.Persistent);
         }
 
@@ -109,7 +118,7 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         public IEnumerator<(int3, ushort)> GetEnumerator() {
             foreach (int3 coord in Enumerators.EnumerateVolume(
-                max: new int3(32, 32, 32), step: VoxelSize
+                max: new int3(ChunkSize, ChunkSize, ChunkSize), step: VoxelSize
             )) {
                 yield return (coord, this[coord]);
             }

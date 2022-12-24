@@ -11,8 +11,12 @@ namespace Atrufulgium.Voxel {
 
         private void Awake() {
             meshFilter = GetComponent<MeshFilter>();
+            if (mesher != null)
+                mesher.Dispose();
             mesher = new();
 
+            if (baseChunk.voxels.IsCreated)
+                baseChunk.Dispose();
             baseChunk = new(0);
             foreach((int3 pos, ushort _) in baseChunk) {
                 //int val = (pos.x - 16) * (pos.x - 16) + (pos.z - 16) * (pos.z - 16);
@@ -25,7 +29,7 @@ namespace Atrufulgium.Voxel {
             }
         }
 
-        [Range(0, 5)]
+        [Range(0, Chunk.ChunkExponent)]
         public int LoD;
 
         private void Update() {
