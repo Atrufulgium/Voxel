@@ -36,13 +36,11 @@ namespace Atrufulgium.Voxel.Base {
         private void Update() {
             frame++;
 
-            if (frame % 1 == 0) {
-                int3 center = rng.NextInt3(-200, 200);
-                center.y /= 20;
-                ushort mat = (ushort)rng.NextInt(0, 4);
-                for (int i = 0; i < 200; i++) {
-                    world.Set(center + rng.NextInt3(-4, 4), mat);
-                }
+            int3 center = rng.NextInt3(-200, 200);
+            center.y /= 20;
+            ushort mat = (ushort)rng.NextInt(0, 4);
+            for (int i = 0; i < 200; i++) {
+                world.Set(center + rng.NextInt3(-4, 4), mat);
             }
 
             for (int i = 0; i < 10; i++) {
@@ -59,11 +57,12 @@ namespace Atrufulgium.Voxel.Base {
                 }
             }
 
-            if (frame % 60 == 0) {
-                foreach((var key, var mesh) in ChunkMesher.GetAllCompletedMeshes()) {
-                    if (!meshes.TryGetValue(key, out MeshFilter filter))
-                        filter = CreateChunkMesh(key);
-                    filter.mesh = mesh;
+            foreach(var key in ChunkMesher.GetAllCompletedJobs()) {
+                if (!meshes.TryGetValue(key, out MeshFilter filter))
+                    filter = CreateChunkMesh(key);
+                Mesh oldMesh = filter.mesh;
+                if (ChunkMesher.TryCompleteMeshAsynchronously(key, out Mesh newMesh, in oldMesh)) {
+                    filter.mesh = newMesh;
                 }
             }
         }

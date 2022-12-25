@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 
 namespace Atrufulgium.Voxel.Base {
 
-    [BurstCompile(CompileSynchronously = true)]
+    [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
     struct ChunkMesherJob : IJob {
 
         /// <summary>

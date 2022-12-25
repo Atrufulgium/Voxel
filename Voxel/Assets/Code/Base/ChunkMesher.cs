@@ -95,9 +95,13 @@ namespace Atrufulgium.Voxel.Base {
         /// Polls whether the mesh construction has been completed. If so, puts
         /// the resulting mesh in the out param <paramref name="mesh"/>.
         /// </summary>
-        public bool TryCompleteMeshAsynchronously(out Mesh mesh) {
+        /// <param name="oldMesh">
+        /// The existing mesh to overwrite if the process is done.
+        /// Heavily prefer to pass something to not generate garbage.
+        /// </param>
+        public bool TryCompleteMeshAsynchronously(out Mesh mesh, in Mesh oldMesh = null) {
             if (!async)
-                throw new ArgumentException("Have not started any asynchonous meshing!");
+                throw new InvalidOperationException("Have not started any asynchonous meshing!");
             if (!handle.IsCompleted) {
                 mesh = null;
                 return false;
@@ -108,7 +112,12 @@ namespace Atrufulgium.Voxel.Base {
             // We were working on a copy.
             meshJob.chunk.Dispose();
 
-            mesh = new Mesh();
+            if (oldMesh == null) {
+                mesh = new Mesh();
+            } else {
+                oldMesh.Clear();
+                mesh = oldMesh;
+            }
             mesh.SetVertexBufferParams(meshJob.vertices.Length, Vertex.Layout);
             // (Flag 15 supresses all messages)
             mesh.SetVertexBufferData(meshJob.vertices.AsArray(), 0, 0, meshJob.vertices.Length, flags: (MeshUpdateFlags)15);
@@ -140,21 +149,24 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         public static void DisposeStatic() {
-            bool dangerous = activeMeshers.Count > 0;
+            if (activeMeshers.Count > 0) {
+                Debug.LogWarning($"There are still {activeMeshers.Count} active meshing jobs. Forcing them to finish before disposing them, but this might take a while!");
+
+                Mesh placeholder = new();
+
+                foreach ((var chunkKey, var chunkMesher) in Enumerators.EnumerateCopy(activeMeshers)) {
+                    chunkMesher.handle.Complete();
+                    ChunkMesher.TryCompleteMeshAsynchronously(chunkKey, out placeholder, in placeholder);
+                }
+            }
 
             while (idleMeshers.Count > 0) {
                 idleMeshers.Pop().Dispose();
             }
-            foreach((var key, var chunkMesher) in Enumerators.EnumerateCopy(activeMeshers)) {
-                chunkMesher.Dispose();
-            }
-
-            if (dangerous)
-                throw new InvalidOperationException("There were still active jobs. Disposed them, but everything will probably go wrong!");
         }
 
-        static Stack<ChunkMesher> idleMeshers = new();
-        static Dictionary<ChunkKey, ChunkMesher> activeMeshers = new();
+        static readonly Stack<ChunkMesher> idleMeshers = new();
+        static readonly Dictionary<ChunkKey, ChunkMesher> activeMeshers = new();
 
         /// <inheritdoc cref="GetMeshAsynchonously(Chunk, float3)"/>
         /// <param name="key"> The unique identifier of this meshing job. </param>
@@ -169,16 +181,13 @@ namespace Atrufulgium.Voxel.Base {
             activeMeshers.Add(key, mesher);
         }
 
-        /// <inheritdoc cref="TryCompleteMeshAsynchronously(out Mesh)"/>
+        /// <inheritdoc cref="TryCompleteMeshAsynchronously(out Mesh, in Mesh)"/>
         /// <param name="key"> The unique identifier of this meshing job. </param>
-        public static bool TryCompleteMeshAsynchronously(ChunkKey key, out Mesh mesh) {
+        public static bool TryCompleteMeshAsynchronously(ChunkKey key, out Mesh mesh, in Mesh oldMesh = null) {
             if (!activeMeshers.TryGetValue(key, out ChunkMesher mesher))
                 throw new ArgumentException($"There is no meshing job with ID {key}", nameof(key));
 
-            if (mesher.TryCompleteMeshAsynchronously(out mesh)) {
-                // A bit awkward, but both this and
-                /// <see cref="GetAllCompletedMeshes(int)"/>
-                // have these two lines.
+            if (mesher.TryCompleteMeshAsynchronously(out mesh, in oldMesh)) {
                 activeMeshers.Remove(key);
                 idleMeshers.Push(mesher);
                 return true;
@@ -199,17 +208,11 @@ namespace Atrufulgium.Voxel.Base {
         /// <param name="maxCompletions">
         /// The maximum number of iterations to run.
         /// </param>
-        public static IEnumerable<(ChunkKey key, Mesh mesh)> GetAllCompletedMeshes(int maxCompletions = int.MaxValue) {
+        public static IEnumerable<ChunkKey> GetAllCompletedJobs(int maxCompletions = int.MaxValue) {
             int completed = 0;
             foreach ((var key, var mesher) in Enumerators.EnumerateCopy(activeMeshers)) {
-                if (mesher.TryCompleteMeshAsynchronously(out Mesh mesh)) {
-                    // A bit awkward, but both this and
-                    /// <see cref="TryCompleteMeshAsynchronously(ChunkKey, out Mesh)"/>
-                    // have these two lines.
-                    activeMeshers.Remove(key);
-                    idleMeshers.Push(mesher);
-                    yield return (key, mesh);
-
+                if (mesher.handle.IsCompleted) {
+                    yield return key;
                     completed++;
                     if (completed >= maxCompletions)
                         yield break;
