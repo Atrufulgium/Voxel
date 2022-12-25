@@ -88,7 +88,14 @@ namespace Atrufulgium.Voxel.Base {
             for (int x = -radius; x < radius; x++) {
                 int bound = (int)math.sqrt(radius*radius - x * x);
                 for (int z = -bound; z < bound; z++) {
-                    world.Set(new(x, -10, z), 1);
+                    float height
+                        =  1 * Mathf.PerlinNoise(x /  1f, z /  1f)
+                        +  2 * Mathf.PerlinNoise(x /  2f, z /  2f)
+                        +  4 * Mathf.PerlinNoise(x /  4f, z /  4f)
+                        +  8 * Mathf.PerlinNoise(x /  8f, z /  8f)
+                        + 16 * Mathf.PerlinNoise(x / 16f, z / 16f);
+                    for (int y = -5; y < height - 10; y++)
+                        world.Set(new(x, y, z), 1);
                 }
             }
         }
