@@ -108,6 +108,15 @@ namespace Atrufulgium.Voxel.Base {
             }
         }
 
+        /// <summary>
+        /// Creates a copy of the chunk, including voxel data.
+        /// </summary>
+        public Chunk GetCopy() {
+            Chunk copy = new(LoD);
+            copy.voxels.CopyFrom(voxels);
+            return copy;
+        }
+
         // These are brute-force checked over all (LoD,pos)'s.
         public int CoordToIndexMorton3(int3 coord) {
             coord >>= LoD;

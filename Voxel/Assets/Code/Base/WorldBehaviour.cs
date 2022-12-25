@@ -19,8 +19,10 @@ namespace Atrufulgium.Voxel.Base {
             if (voxelMat == null)
                 voxelMat = Resources.Load<Material>("Materials/Voxel");
 
-            if (!World.TryGetWorld(0, out world))
-                world = new World(0);
+            if (World.WorldExists(0)) {
+                World.RemoveWorld(0);
+            }
+            world = new World(0);
             mesher = new();
             transform = GetComponent<Transform>();
 
@@ -29,19 +31,39 @@ namespace Atrufulgium.Voxel.Base {
             Generate();
         }
 
+        int frame = 0;
+
         private void Update() {
-            int3 center = rng.NextInt3(-200, 200);
-            center.y /= 20;
-            ushort mat = (ushort)rng.NextInt(0, 4);
-            for (int i = 0; i < 200; i++) {
-                world.Set(center + rng.NextInt3(-4, 4), mat);
+            frame++;
+
+            if (frame % 1 == 0) {
+                int3 center = rng.NextInt3(-200, 200);
+                center.y /= 20;
+                ushort mat = (ushort)rng.NextInt(0, 4);
+                for (int i = 0; i < 200; i++) {
+                    world.Set(center + rng.NextInt3(-4, 4), mat);
+                }
             }
 
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 10; i++) {
                 if (world.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
+                    // If it's active already, put it at the end of the queue to
+                    // try again later.
+                    // This may only be needed if the race conditions are in our
+                    // disadvantage (which they always are, of course).
+                    if (ChunkMesher.JobExists(key)) {
+                        world.MarkDirty(key);
+                    } else {
+                        ChunkMesher.GetMeshAsynchronously(key, chunk, 0);
+                    }
+                }
+            }
+
+            if (frame % 60 == 0) {
+                foreach((var key, var mesh) in ChunkMesher.GetAllCompletedMeshes()) {
                     if (!meshes.TryGetValue(key, out MeshFilter filter))
                         filter = CreateChunkMesh(key);
-                    filter.mesh = mesher.GetMesh(chunk);
+                    filter.mesh = mesh;
                 }
             }
         }
@@ -49,6 +71,7 @@ namespace Atrufulgium.Voxel.Base {
         private void OnDestroy() {
             world.Dispose();
             mesher.Dispose();
+            ChunkMesher.DisposeStatic();
         }
 
         private MeshFilter CreateChunkMesh(ChunkKey key) {

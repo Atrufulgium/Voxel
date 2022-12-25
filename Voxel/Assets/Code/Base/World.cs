@@ -102,13 +102,34 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         /// <summary>
+        /// Marks a given chunk to be dirty without any reason.
+        /// </summary>
+        public void MarkDirty(ChunkKey key) {
+            dirtyChunks.Enqueue(key);
+        }
+
+        /// <summary>
         /// Returns whether a given world ID exists.
         /// </summary>
         public static bool WorldExists(int id)
             => knownWorlds.ContainsKey(id);
 
+        /// <summary>
+        /// If the given world exists, returns it.
+        /// </summary>
         public static bool TryGetWorld(int id, out World world)
             => knownWorlds.TryGetValue(id, out world);
+
+        /// <summary>
+        /// Removes an existing world.
+        /// </summary>
+        public static void RemoveWorld(int id) {
+            if (!TryGetWorld(id, out World world))
+                throw new ArgumentException($"World id {id} does not exist and cannot be removed.");
+
+            knownWorlds.Remove(id);
+            world.Dispose();
+        }
 
         public void Dispose() {
             foreach(var (_, chunk) in allChunks) {

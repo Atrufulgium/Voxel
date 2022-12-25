@@ -39,7 +39,7 @@ namespace Atrufulgium.Voxel {
                 LoD = 1;
             for (int i = 0; i < 10; i++) {
                 using Chunk c = baseChunk.WithLoD(LoD);
-                meshFilter.mesh = mesher.GetMesh(c);
+                meshFilter.mesh = mesher.GetMeshSynchronously(c);
             }
 
         }
@@ -49,7 +49,7 @@ namespace Atrufulgium.Voxel {
                 Awake();
 
             using Chunk c = baseChunk.WithLoD(LoD);
-            meshFilter.mesh = mesher.GetMesh(c);
+            meshFilter.mesh = mesher.GetMeshSynchronously(c);
         }
 
         private void OnDestroy() {

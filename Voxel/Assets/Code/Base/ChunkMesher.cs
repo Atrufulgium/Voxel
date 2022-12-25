@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Atrufulgium.Voxel.Collections;
+using System;
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -8,6 +10,10 @@ using UnityEngine.Rendering;
 
 namespace Atrufulgium.Voxel.Base {
 
+    /// <summary>
+    /// Provides both instance methods for one mesh job at a time, as well as
+    /// static methods for handling many meshings asynchronously.
+    /// </summary>
     public class ChunkMesher : IDisposable {
 
         NativeList<Vertex> vertices = new(2 * (ushort.MaxValue + 1), Allocator.Persistent);
@@ -17,7 +23,8 @@ namespace Atrufulgium.Voxel.Base {
 
         /// <summary>
         /// <para>
-        /// Turns this chunk into meshes.
+        /// Turns this chunk into meshes. This runs blocks the thread that
+        /// calls this until it is completed.
         /// </para>
         /// <para>
         /// Any face whose normals would be opposite to <paramref name="viewDir"/>
@@ -40,21 +47,69 @@ namespace Atrufulgium.Voxel.Base {
         // Note that we also have a "don't care" region in nearly all planes as
         // we don't care what covered voxels do. Taking into account OPT in
         // this case seems nearly impossible.
-        public Mesh GetMesh(Chunk chunk, float3 viewDir = default) {
+        public Mesh GetMeshSynchronously(Chunk chunk, float3 viewDir = default) {
+            GetMeshAsynchonously(chunk, viewDir);
+            handle.Complete();
+            TryCompleteMeshAsynchronously(out Mesh mesh);
+            return mesh;
+        }
+
+        bool async = false;
+        JobHandle handle;
+        ChunkMesherJob meshJob;
+
+        /// <summary>
+        /// <para>
+        /// Starts converting this chunk into a mesh. The completion can be
+        /// polled with <see cref="TryCompleteMeshAsynchronously(out Mesh)"/>.
+        /// </para>
+        /// <para>
+        /// Any face whose normals would be opposite to <paramref name="viewDir"/>
+        /// are culled in this step already. Pass the zero-vector to cull nothing.
+        /// Note that to use this, you need to not only consider the camera
+        /// direction, but also the object's transform.
+        /// </para>
+        /// </summary>
+        /// <inheritdoc cref="GetMeshSynchronously(Chunk, float3)"/>
+        public void GetMeshAsynchonously(Chunk chunk, float3 viewDir = default) {
+            if (async)
+                throw new InvalidOperationException("Cannot use the same ChunkMesher instance for multiple meshing tasks. Use multiple instances.");
+
             vertices.Clear();
             vertToIndex.Clear();
             quads.Clear();
-            var meshJob = new ChunkMesherJob {
-                chunk = chunk,
+            meshJob = new ChunkMesherJob {
+                // Work on a copy to not have issues with race conditions.
+                // However, we need to also dispose this copy of course!
+                chunk = chunk.GetCopy(),
                 viewDir = viewDir,
                 vertices = vertices,
                 quads = quads,
                 vertToIndex = vertToIndex,
                 rects = rects
             };
-            meshJob.Schedule().Complete();
+            handle = meshJob.Schedule();
+            async = true;
+        }
 
-            var mesh = new Mesh();
+        /// <summary>
+        /// Polls whether the mesh construction has been completed. If so, puts
+        /// the resulting mesh in the out param <paramref name="mesh"/>.
+        /// </summary>
+        public bool TryCompleteMeshAsynchronously(out Mesh mesh) {
+            if (!async)
+                throw new ArgumentException("Have not started any asynchonous meshing!");
+            if (!handle.IsCompleted) {
+                mesh = null;
+                return false;
+            }
+            // I don't know *why* a handle.IsCompleted job needs a Complete()
+            // call, but it does, so here we are.
+            handle.Complete();
+            // We were working on a copy.
+            meshJob.chunk.Dispose();
+
+            mesh = new Mesh();
             mesh.SetVertexBufferParams(meshJob.vertices.Length, Vertex.Layout);
             // (Flag 15 supresses all messages)
             mesh.SetVertexBufferData(meshJob.vertices.AsArray(), 0, 0, meshJob.vertices.Length, flags: (MeshUpdateFlags)15);
@@ -69,11 +124,13 @@ namespace Atrufulgium.Voxel.Base {
 
             // Settings bounds sends an update mssage
             mesh.bounds = new(
-                new(Chunk.ChunkSize/2, Chunk.ChunkSize/2, Chunk.ChunkSize/2),
+                new(Chunk.ChunkSize / 2, Chunk.ChunkSize / 2, Chunk.ChunkSize / 2),
                 new(Chunk.ChunkSize, Chunk.ChunkSize, Chunk.ChunkSize)
             );
 
-            return mesh;
+            handle = default;
+            async = false;
+            return true;
         }
 
         public void Dispose() {
@@ -81,6 +138,84 @@ namespace Atrufulgium.Voxel.Base {
             quads.Dispose();
             vertToIndex.Dispose();
             rects.Dispose();
+        }
+
+        public static void DisposeStatic() {
+            bool dangerous = activeMeshers.Count > 0;
+
+            while (idleMeshers.Count > 0) {
+                idleMeshers.Pop().Dispose();
+            }
+            foreach((var key, var chunkMesher) in Enumerators.EnumerateCopy(activeMeshers)) {
+                chunkMesher.Dispose();
+            }
+
+            if (dangerous)
+                throw new InvalidOperationException("There were still active jobs. Disposed them, but everything will probably go wrong!");
+        }
+
+        static Stack<ChunkMesher> idleMeshers = new();
+        static Dictionary<ChunkKey, ChunkMesher> activeMeshers = new();
+
+        /// <inheritdoc cref="GetMeshAsynchonously(Chunk, float3)"/>
+        /// <param name="key"> The unique identifier of this meshing job. </param>
+        public static void GetMeshAsynchronously(ChunkKey key, Chunk chunk, float3 viewDir = default) {
+            ChunkMesher mesher;
+            if (idleMeshers.Count == 0) {
+                mesher = new();
+            } else {
+                mesher = idleMeshers.Pop();
+            }
+            mesher.GetMeshAsynchonously(chunk, viewDir);
+            activeMeshers.Add(key, mesher);
+        }
+
+        /// <inheritdoc cref="TryCompleteMeshAsynchronously(out Mesh)"/>
+        /// <param name="key"> The unique identifier of this meshing job. </param>
+        public static bool TryCompleteMeshAsynchronously(ChunkKey key, out Mesh mesh) {
+            if (!activeMeshers.TryGetValue(key, out ChunkMesher mesher))
+                throw new ArgumentException($"There is no meshing job with ID {key}", nameof(key));
+
+            if (mesher.TryCompleteMeshAsynchronously(out mesh)) {
+                // A bit awkward, but both this and
+                /// <see cref="GetAllCompletedMeshes(int)"/>
+                // have these two lines.
+                activeMeshers.Remove(key);
+                idleMeshers.Push(mesher);
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Whether or not a given identifier already has an active job.
+        /// </summary>
+        public static bool JobExists(ChunkKey key)
+            => activeMeshers.ContainsKey(key);
+
+        /// <summary>
+        /// Iterates through at most all mesh jobs that have been finished.
+        /// </summary>
+        /// <param name="maxCompletions">
+        /// The maximum number of iterations to run.
+        /// </param>
+        public static IEnumerable<(ChunkKey key, Mesh mesh)> GetAllCompletedMeshes(int maxCompletions = int.MaxValue) {
+            int completed = 0;
+            foreach ((var key, var mesher) in Enumerators.EnumerateCopy(activeMeshers)) {
+                if (mesher.TryCompleteMeshAsynchronously(out Mesh mesh)) {
+                    // A bit awkward, but both this and
+                    /// <see cref="TryCompleteMeshAsynchronously(ChunkKey, out Mesh)"/>
+                    // have these two lines.
+                    activeMeshers.Remove(key);
+                    idleMeshers.Push(mesher);
+                    yield return (key, mesh);
+
+                    completed++;
+                    if (completed >= maxCompletions)
+                        yield break;
+                }
+            }
         }
     }
 
