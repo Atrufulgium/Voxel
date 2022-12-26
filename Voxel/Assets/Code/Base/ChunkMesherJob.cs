@@ -59,7 +59,7 @@ namespace Atrufulgium.Voxel.Base {
         // This would be so much better with an interval tree.
         // I *will* implement those someday for RLE, so I guess,
         // TODO: replace with interval tree.
-        internal NativeParallelHashMap<RectMaterialTuple, RectMaterialTuple> rects;
+        internal NativeParallelHashMap<RectMaterialLayerTuple, RectMaterialLayerTuple> rects;
 
         /// <summary>
         /// In order to keep <see cref="vertices"/> write-only, keep track of
@@ -97,67 +97,89 @@ namespace Atrufulgium.Voxel.Base {
             bool backside
         ) {
             int voxelSize = chunk.VoxelSize;
-            int x, y, layer;
-            for (layer = 0; layer < Chunk.ChunkSize; layer += voxelSize) {
+            // Four layers at a time.
+            // *Perhaps* the y-values can also be partially SIMD'd if careful.
+            // For the x values this is unreasonable though.
+            // As the SIMD can only handle "four at a time" though, this is
+            // sufficient, as otherwise it would be 16 at a time if multiple.
+            int x, y;
+            int4 layers = new int4(0, 1, 2, 3) * voxelSize;
+            for (; layers.w < Chunk.ChunkSize; layers += 4 * voxelSize) {
                 // Considering a single XY-plane, first partition into vertical
                 // rectangles. Rectangles are allowed to go under other voxels
                 // in another layer. Grow those rectangles up if possible.
                 rects.Clear();
                 for (y = 0; y < Chunk.ChunkSize; y += voxelSize) {
-                    RectInt current = default;
-                    ushort currentMat = 0;
+                    RectInt* current = stackalloc RectInt[4];
+                    int4 currentMat = 0;
                     for (x = 0; x < Chunk.ChunkSize + 1; x += voxelSize) {
                         // We're at the end of the chunk and can't do anything
                         // but add a possible WIP rect.
                         bool final = x == Chunk.ChunkSize;
                         // We're different and need to change what we're doing.
-                        bool different = false;
-                        ushort mat = 0;
+                        bool4 different = false;
+                        int4 mat = 0;
                         if (!final) {
-                            mat = chunk[LayerToCoord(x, y, layer, layerMode)];
+                            LayerToCoord(x, y, layers, layerMode, out int4 xOut, out int4 yOut, out int4 zOut);
+                            mat = chunk[xOut, yOut, zOut];
                             different = mat != currentMat;
                         }
                         // We're covered by the previous layer and can do whatever
-                        bool covered;
-                        if (backside) {
-                            covered = !final && layer > 0 && chunk[LayerToCoord(x, y, layer - voxelSize, layerMode)] != 0;
-                        } else {
-                            covered = !final && layer + voxelSize < Chunk.ChunkSize && chunk[LayerToCoord(x, y, layer + voxelSize, layerMode)] != 0;
+                        bool4 covered = false;
+                        if (!final) {
+                            bool4 check;
+                            int4 xOut, yOut, zOut;
+                            if (backside) {
+                                LayerToCoord(x, y, layers - voxelSize, layerMode, out xOut, out yOut, out zOut);
+                                check = layers > 0;
+                            } else {
+                                LayerToCoord(x, y, layers + voxelSize, layerMode, out xOut, out yOut, out zOut);
+                                check = layers + voxelSize < Chunk.ChunkSize;
+                            }
+                            xOut *= (int4)check;
+                            yOut *= (int4)check;
+                            zOut *= (int4)check;
+                            covered = check & chunk[xOut, yOut, zOut] != 0;
                         }
 
-                        // Commit the previous on differences. This automatically
-                        // commits changes on x=32 as that's always "air".
-                        if ((different && !covered || final) && currentMat != 0) {
-                            // We're no longer available.
-                            current.width = x - current.xMin;
-                            var key = new RectMaterialTuple(current, currentMat);
-                            if (rects.ContainsKey(key)) {
-                                // As noted below, the key's equality is not
-                                // transitive. This is an ugly hack, but this
-                                // code *needs* it to be somewhat decent still.
-                                // So we need to actually pop the (key,value)-
-                                // pair and insert one that *looks* the same.
-                                // Yes, this is massive dict-abuse.
-                                var old = rects[key].rect;
-                                rects.Remove(key);
-                                old.height = current.yMin + voxelSize - old.yMin;
-                                key.rect = old;
+                        // This unfortunately needs to be sequential instead
+                        // of SIMD because of branching.
+                        for (int i = 0; i < 4; i++) {
+                            // Commit the previous on differences. This automatically
+                            // commits changes on x=32 as that's always "air".
+                            if ((different[i] && !covered[i] || final) && currentMat[i] != 0) {
+                                // We're no longer available.
+                                current[i].width = x - current[i].xMin;
+                                var key = new RectMaterialLayerTuple(current[i], (ushort)layers[i], (ushort)currentMat[i]);
+                                if (rects.ContainsKey(key)) {
+                                    // As noted below, the key's equality is not
+                                    // transitive. This is an ugly hack, but this
+                                    // code *needs* it to be somewhat decent still.
+                                    // So we need to actually pop the (key,value)-
+                                    // pair and insert one that *looks* the same.
+                                    // Yes, this is massive dict-abuse.
+                                    var old = rects[key].rect;
+                                    rects.Remove(key);
+                                    old.height = current[i].yMin + voxelSize - old.yMin;
+                                    key.rect = old;
+                                }
+                                rects.Add(key, key);
+                                current[i] = default;
+                                currentMat[i] = 0;
                             }
-                            rects.Add(key, key);
-                            current = default;
-                            currentMat = 0;
-                        }
-                        // We're different and not air, so we start a new rect.
-                        if (different && !covered && currentMat == 0) {
-                            current = new(x, y, 0, voxelSize);
-                            currentMat = mat;
-                        }
+                            // We're different and not air, so we start a new rect.
+                            if (different[i] && !covered[i] && currentMat[i] == 0) {
+                                current[i] = new(x, y, 0, voxelSize);
+                                currentMat[i] = mat[i];
+                            }
+                        } // for i
                     } // for x
                 } // for y
 
                 // Then turn those rectangles into quads.
                 foreach (var kvpair in rects) {
                     var rect = kvpair.Value.rect;
+                    var currentLayer = kvpair.Value.layer;
                     var mat = kvpair.Value.mat;
                     int2* corners = stackalloc int2[4];
                     if (backside) {
@@ -176,7 +198,7 @@ namespace Atrufulgium.Voxel.Base {
                         int2 corner = corners[ci];
                         Vertex vert;
 
-                        int z = layer;
+                        int z = currentLayer;
                         if (!backside) {
                             z += voxelSize;
                         }
@@ -205,38 +227,58 @@ namespace Atrufulgium.Voxel.Base {
                 return new(y, layer, x);
             return new(layer, x, y);
         }
+
+        // A variant of the above for four coords.
+        private void LayerToCoord(int x, int y, int4 layer, LayerMode layerMode, out int4 xOut, out int4 yOut, out int4 zOut) {
+            if (layerMode == LayerMode.X) {
+                xOut = x;
+                yOut = y;
+                zOut = layer;
+            } else if (layerMode == LayerMode.Y) {
+                xOut = y;
+                yOut = layer;
+                zOut = x;
+            } else {
+                xOut = layer;
+                yOut = x;
+                zOut = y;
+            }
+        }
     }
 
     /// <summary>
     /// <para>
     /// The comparer only cares about (xMin, width), and the two being
     /// vertically apart by at most one. Also, disregards any different
-    /// two material rects.
+    /// two material rects. Also, two different layers are always different.
     /// </para>
     /// <para>
     /// Note!!! This equality is NOT transitive! This breaks a bunch of
     /// shit you usually wouldn't think about.
     /// </para>
     /// </summary>
-    internal struct RectMaterialTuple : IEquatable<RectMaterialTuple> {
+    internal struct RectMaterialLayerTuple : IEquatable<RectMaterialLayerTuple> {
         public RectInt rect;
+        public ushort layer;
         public ushort mat;
 
-        public RectMaterialTuple(RectInt rect, ushort mat) {
+        public RectMaterialLayerTuple(RectInt rect, ushort layer, ushort mat) {
             this.rect = rect;
+            this.layer = layer;
             this.mat = mat;
         }
 
-        bool IEquatable<RectMaterialTuple>.Equals(RectMaterialTuple other)
-            => mat == other.mat
+        bool IEquatable<RectMaterialLayerTuple>.Equals(RectMaterialLayerTuple other)
+            => layer == other.layer
+            && mat == other.mat
             && rect.xMin == other.rect.xMin && rect.width == other.rect.width
             && (rect.yMin == other.rect.yMax || rect.yMax == other.rect.yMin);
 
         public override bool Equals(object obj)
-            => obj is RectMaterialTuple other && ((IEquatable<RectMaterialTuple>)this).Equals(other);
+            => obj is RectMaterialLayerTuple other && ((IEquatable<RectMaterialLayerTuple>)this).Equals(other);
 
         public override int GetHashCode()
-            => rect.xMax + 33 * rect.width + 33 * 33 * mat;
+            => rect.xMax + 33 * rect.width + 33 * 33 * layer + 33 * 33 * 33 * mat;
     }
 
     /// <summary>

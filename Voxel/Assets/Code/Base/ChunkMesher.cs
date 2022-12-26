@@ -18,7 +18,7 @@ namespace Atrufulgium.Voxel.Base {
         NativeList<Vertex> vertices = new(2 * (ushort.MaxValue + 1), Allocator.Persistent);
         NativeList<ushort> quads = new(ushort.MaxValue + 1, Allocator.Persistent);
         NativeParallelHashMap<Vertex, int> vertToIndex = new(ushort.MaxValue + 1, Allocator.Persistent);
-        NativeParallelHashMap<RectMaterialTuple, RectMaterialTuple> rects = new(64, Allocator.Persistent);
+        NativeParallelHashMap<RectMaterialLayerTuple, RectMaterialLayerTuple> rects = new(64, Allocator.Persistent);
 
         /// <summary>
         /// <para>

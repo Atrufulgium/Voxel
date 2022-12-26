@@ -72,6 +72,31 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         /// <summary>
+        /// <inheritdoc cref="this[int3]"/>
+        /// <para>
+        /// This is a version that handles four values at a time.
+        /// </para>
+        /// </summary>
+        public int4 this[int4 x, int4 y, int4 z] {
+            get {
+                int4 index = CoordToIndexMorton3(x, y, z);
+                int4 ret;
+                ret.x = voxels[index.x];
+                ret.y = voxels[index.y];
+                ret.z = voxels[index.z];
+                ret.w = voxels[index.w];
+                return ret;
+            }
+            set {
+                int4 index = CoordToIndexMorton3(x, y, z);
+                voxels[index.x] = (ushort)value.x;
+                voxels[index.y] = (ushort)value.y;
+                voxels[index.z] = (ushort)value.z;
+                voxels[index.w] = (ushort)value.w;
+            }
+        }
+
+        /// <summary>
         /// <para>
         /// Returns a new chunk with a worse detail level than currently.
         /// </para>
@@ -131,6 +156,20 @@ namespace Atrufulgium.Voxel.Base {
             return coord << LoD;
         }
 
+        public int4 CoordToIndexMorton3(int4 x, int4 y, int4 z) {
+            x >>= LoD;
+            y >>= LoD;
+            z >>= LoD;
+            return Morton3(x, y, z);
+        }
+
+        public void IndexToCoordMorton3(int4 index, out int4 x, out int4 y, out int4 z) {
+            UnMorton3(index, out x, out y, out z);
+            x <<= LoD;
+            y <<= LoD;
+            z <<= LoD;
+        }
+
         /// <summary>
         /// Iterates over all voxels in this chunk and returns a
         /// (position, material)-tuple at each iteration. The position
@@ -174,6 +213,46 @@ namespace Atrufulgium.Voxel.Base {
             v = (v | (v >> 4)) & 0x300F;
             v = (v | (v >> 8)) &   0x3F;
             return v;
+        }
+
+        /// <summary>
+        /// <inheritdoc cref="Morton3(int3)"/>
+        /// <para>
+        /// This is a version that handles four values at a time.
+        /// </para>
+        /// </summary>
+        private static int4 Morton3(int4 x, int4 y, int4 z) {
+            x = (x | (x << 8)) & 0x300F;
+            y = (y | (y << 8)) & 0x300F;
+            z = (z | (z << 8)) & 0x300F;
+            x = (x | (x << 4)) & 0x30C3;
+            y = (y | (y << 4)) & 0x30C3;
+            z = (z | (z << 4)) & 0x30C3;
+            x = (x | (x << 2)) & 0x9249;
+            y = (y | (y << 2)) & 0x9249;
+            z = (z | (z << 2)) & 0x9249;
+            return x + 2 * y + 4 * z;
+        }
+
+        /// <summary>
+        /// <inheritdoc cref="UnMorton3(int)"/>
+        /// <para>
+        /// This is a version that handles four values at a time.
+        /// </para>
+        /// </summary>
+        private static void UnMorton3(int4 c, out int4 x, out int4 y, out int4 z) {
+            x = (c / 1) & 0x9249;
+            y = (c / 2) & 0x9249;
+            z = (c / 4) & 0x9249;
+            x = (x | (x >> 2)) & 0x30C3;
+            y = (y | (y >> 2)) & 0x30C3;
+            z = (z | (z >> 2)) & 0x30C3;
+            x = (x | (x >> 4)) & 0x300F;
+            y = (y | (y >> 4)) & 0x300F;
+            z = (z | (z >> 4)) & 0x300F;
+            x = (x | (x >> 8)) &   0x3F;
+            y = (y | (y >> 8)) &   0x3F;
+            z = (z | (z >> 8)) &   0x3F;
         }
 
         public void Dispose() {

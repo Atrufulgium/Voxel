@@ -84,7 +84,7 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         private void Generate() {
-            int radius = 100;
+            int radius = 300;
             for (int x = -radius; x < radius; x++) {
                 int bound = (int)math.sqrt(radius*radius - x * x);
                 for (int z = -bound; z < bound; z++) {
