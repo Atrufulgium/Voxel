@@ -1,0 +1,4 @@
+*.png
+# It's the default importer now; easily regenerated when missing.
+*.png.meta
+!sample.png

@@ -21,8 +21,8 @@ struct aVertex {
     float4 vertex;
 };
 
-sampler2D _MainTex;
-float4 _MainTex_ST;
+SamplerState sampler_VoxelTex;
+Texture2DArray _VoxelTex;
 
 v2f vert (appdata a) {
     v2f o;
@@ -44,13 +44,19 @@ v2f vert (appdata a) {
 fixed4 frag (v2f i) : SV_Target {
     float3 normal;
     float2 uv;
-    get_normals_uvs(i.vertex_object_space, i.vertex_world_space, normal, uv);
+    FACE face;
+    get_normals_uvs(i.vertex_object_space, i.vertex_world_space, normal, uv, face);
     // 𝘕𝘰𝘸 𝘸𝘦 𝘤𝘢𝘯 𝘧𝘪𝘯𝘢𝘭𝘭𝘺 𝘨𝘦𝘵 𝘵𝘰 𝘥𝘰 𝘳𝘦𝘨𝘶𝘭𝘢𝘳 𝘴𝘩𝘪𝘵
+
+    float3 texture_uv = float3(uv, 0);
+    texture_uv.x = (uv.x + face) / 6;
+    texture_uv.z = i.material;
 
     float3 light_vector = normalize(float3(1,3,2));
     float ambient = 0.3;
     float atten = LIGHT_ATTENUATION(i); 
-    float3 c = (ambient + atten*(1 - ambient)*dot(normal, light_vector)) * float3(uv * 0.5 + 0.5, i.material * 0.5);
+    float3 c = atten.xxx + 0.1; //(ambient + atten*(1 - ambient)*dot(normal, light_vector)) * float3(uv * 0.5 + 0.5, i.material * 0.5);
+    c *= _VoxelTex.Sample(sampler_VoxelTex, texture_uv).rgb;
 
-    return float4(atten.xxx, 1);
+    return float4(c, 1);
 }

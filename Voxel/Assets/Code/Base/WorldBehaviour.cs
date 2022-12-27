@@ -38,7 +38,7 @@ namespace Atrufulgium.Voxel.Base {
 
             int3 center = rng.NextInt3(-200, 200);
             center.y /= 20;
-            ushort mat = (ushort)rng.NextInt(0, 4);
+            ushort mat = 3;
             for (int i = 0; i < 200; i++) {
                 world.Set(center + rng.NextInt3(-4, 4), mat);
             }
@@ -95,7 +95,8 @@ namespace Atrufulgium.Voxel.Base {
                         +  8 * Mathf.PerlinNoise(x /  8f, z /  8f)
                         + 16 * Mathf.PerlinNoise(x / 16f, z / 16f);
                     for (int y = -5; y < height - 10; y++)
-                        world.Set(new(x, y, z), 1);
+                        world.Set(new(x, y, z), 2);
+                    world.Set(new(x, (int)height - 10, z), 1);
                 }
             }
         }
