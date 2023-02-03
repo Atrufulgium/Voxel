@@ -1,52 +1,60 @@
+// I'm not doing any *actual* tesselation.
+// It's just to access the entire triangle to build the mesh normals and uvs properly.
 #pragma vertex vert
-#pragma fragment frag
-#pragma target 2.0
-#pragma multi_compile_shadowcaster
+#pragma domain domain
+#pragma hull hull
+#pragma fragment fragShadowCaster
+
 #include "UnityCG.cginc"
+#include "AutoLight.cginc"
+#include "UnityStandardShadow.cginc"
+
 #include "VoxelHelpers.cginc"
 
-// Based on the basic VertexLit shader, but modified to suit my custom input.
-// For the macros, see
-// https://github.com/TwoTailsGames/Unity-Built-in-Shaders/blob/6a63f93bc1f20ce6cd47f981c7494e8328915621/CGIncludes/UnityCG.cginc#L930
-
-// The TRANSFER_SHADOW_CASTER_NORMALOFFSET(o) = TRANSFER_SHADOW_CASTER_NOPOS(o,o.pos) is
-//     o.vec = mul(unity_ObjectToWorld, v.vertex).xyz - _LightPositionRange.xyz;
-//     o.pos = UnityObjectToClipPos(v.vertex);
-// when point light `#if defined(SHADOWS_CUBE) && !defined(SHADOWS_CUBE_IN_DEPTH_TEX)`, and
-//                                                                          (Alternatively, without normals:)
-//     o.pos = UnityClipSpaceShadowCasterPos(v.vertex, v.normal);           o.pos = UnityObjectToClipPos(v.vertex.xyz);
-//     o.pos = UnityApplyLinearShadowBias(opos);                            o.pos = UnityApplyLinearShadowBias(opos);
-// when directional or spotlight `#ELSE` (wrt above).
-
-// The SHADOW_CASTER_FRAGMENT(i) is
-//     return UnityEncodeCubeShadowDepth ((length(i.vec) + unity_LightShadowBias.x) * _LightPositionRange.w);
-// when point light, and
-//     return 0;
-// when directinoal or spotlight.
-// As such, this one doesn't need to be modified.
-
-struct v2f {
-    V2F_SHADOW_CASTER;          // float3 vec : TEXCOORD0 or nothing at all
+// Strict superset of VertexInput
+struct VertexInputTangent {
+    float4 vertex   : POSITION;
+    float3 normal   : NORMAL;
+    float2 uv0      : TEXCOORD0;
+    half3 tangent   : TANGENT;
 };
 
-v2f vert(appdata v) {
-    v2f o;
-    float4 vertex;
-    uint material;
-    unpack(v, vertex, material);
+[UNITY_domain("quad")]
+void domain(
+    TessFactors factors,
+    OutputPatch<appdata, 4> patch,
+    float2 tessUV : SV_DomainLocation
+    
+    , out float4 opos : SV_POSITION
+    #ifdef UNITY_STANDARD_USE_SHADOW_OUTPUT_STRUCT
+    , out VertexOutputShadowCaster o
+    #endif
+    #ifdef UNITY_STANDARD_USE_STEREO_SHADOW_OUTPUT_STRUCT
+    , out VertexOutputStereoShadowCaster os
+    #endif
+) {
+    VertexInputTangent v;
 
-    //TRANSFER_SHADOW_CASTER_NORMALOFFSET(o)
-#if defined(SHADOWS_CUBE) && !defined(SHADOWS_CUBE_IN_DEPTH_TEX)
-    o.vec = mul(unity_ObjectToWorld, vertex) - _LightPositionRange.xyz;
-    o.pos = UnityObjectToClipPos(o.vec);
-#else
-    o.pos = UnityObjectToClipPos(vertex);
-    o.pos = UnityApplyLinearShadowBias(o.pos);
-#endif
+    float4 pos; float3 normal; float3 tangent; float2 uv; uint material;
+    computeVertNormTanUVMaterial(
+        /* in  */ patch, tessUV,
+        /* out */ pos, normal, tangent, uv, material
+    );
 
-    return o;
-}
+    v.vertex = pos;
+    v.normal = normal;
+    v.uv0 = uv;
+    v.tangent = tangent;
+    
+    vertShadowCaster(
+        (VertexInput)v
 
-float4 frag(v2f i) : SV_Target {
-    SHADOW_CASTER_FRAGMENT(i)
+        , opos
+        #ifdef UNITY_STANDARD_USE_SHADOW_OUTPUT_STRUCT
+        , o
+        #endif
+        #ifdef UNITY_STANDARD_USE_STEREO_SHADOW_OUTPUT_STRUCT
+        , os
+        #endif
+    );
 }

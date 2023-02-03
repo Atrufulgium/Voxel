@@ -8,6 +8,39 @@ struct appdata {
     uint data : BLENDINDICES;
 };
 
+appdata vert(appdata v) {
+    return v;
+}
+
+struct TessFactors {
+    float edge[4] : SV_TessFactor;
+    float inside[2] : SV_InsideTessFactor;
+};
+
+TessFactors GetTessFactors(InputPatch<appdata, 4> patch) {
+    // As mentioned earlier we're not actually tesselating.
+    // We're only doing this to gain access to the entire triangle.
+	TessFactors f;
+    [unroll]
+    for (int i = 0; i < 4; i++)
+        f.edge[i] = 1;
+	f.inside[0] = 0;
+    f.inside[1] = 0;
+	return f;
+}
+
+[UNITY_domain("quad")]
+[UNITY_outputcontrolpoints(4)]
+[UNITY_outputtopology("triangle_cw")]
+[UNITY_partitioning("integer")]
+[UNITY_patchconstantfunc("GetTessFactors")]
+appdata hull(
+    InputPatch<appdata, 4> patch,
+    uint id : SV_OUTPUTCONTROLPOINTID
+) {
+    return patch[id];
+}
+
 // Unpacks the above struct into useful data.
 void unpack(appdata v, out float4 pos, out uint material) {
     // Unpack
@@ -22,6 +55,56 @@ void unpack(appdata v, out float4 pos, out uint material) {
     material = v.data;
 }
 
+void computeVertNormTanUVMaterial(
+    in OutputPatch<appdata, 4> patch,
+    in float2 tessUV,
+    
+    out float4 pos,
+    out float3 normal,
+    out float3 tangent,
+    out float2 uv,
+    out uint material
+) {
+    float4 posses[4];
+    uint _;
+    unpack(patch[0], posses[0], material);
+    unpack(patch[1], posses[1], _);
+    unpack(patch[2], posses[2], _);
+    unpack(patch[3], posses[3], _);
+
+    // The appdata[4] is clockwise.
+    float2 coordUV = tessUV;
+    if (coordUV.y == 1)
+        coordUV.x = 1 - coordUV.x;
+    int index = (int)dot(coordUV, float2(1,2));
+    pos = posses[index];
+    
+    float3 dx1 = posses[1].xyz - posses[0].xyz;
+    float3 dx2 = posses[3].xyz - posses[0].xyz;
+    normal = cross(dx1, dx2);
+    // Now the normal is correct up to sign. The correct sign is the one such
+    // that the normal points to the halfspace containing the camera.
+    float3 basePoint = posses[0];
+    float3 testPoint = mul(unity_WorldToObject, float4(_WorldSpaceCameraPos, 1)).xyz;
+    if (dot(normal, testPoint - basePoint) < 0)
+        normal *= -1;
+    
+    tangent = float3(normal.y, -normal.x, normal.z);
+    
+    // Texture UVs can also be calculated, though not yet frac'd.
+    float3 dxdiag = posses[2].xyz - posses[0].xyz;
+    float2 uvmax;
+    if (normal.x != 0)
+        uvmax = dxdiag.zy;
+    else if (normal.y != 0)
+        uvmax = dxdiag.xz;
+    else if (normal.z != 0)
+        uvmax = dxdiag.yx;
+    else
+        uvmax = 0;
+    uv = tessUV * uvmax;
+}
+
 #define FACE float
 #define XPOS 0
 #define YPOS 1
@@ -30,55 +113,29 @@ void unpack(appdata v, out float4 pos, out uint material) {
 #define YNEG 4
 #define ZNEG 5
 
-// Converts an object-space-axis-aligned plane into normals and uvs.
-// To save some calculation effort, also requires world space coords.
-// Spits out which direction our face points in model space because that
-// requires basically no extra effort.
-void get_normals_uvs(float4 vertex_object_space, float3 vertex_world_space, out float3 normal, out float2 uv, out FACE face) {
-    // We want the normals in world-space. We only have the normals up to
-    // in-/outwards pointing (sign), and using those is a pain. Just use the
-    // depth we have access to to construct a bitangent basis to get a normal.
-    float3 world_ddx = ddx(vertex_world_space);
-    float3 world_ddy = ddy(vertex_world_space);
-    normal = normalize(cross(world_ddy, world_ddx)); // order: trial&error
-
-    // Calculate the uvs from the (*,*,0)/(*,0,*)/(0,*,*) derivs that tell us
-    // what this quad looks like. Even though the vector values are camera
-    // dependent, whether it's zero or an * isn't. (..Mostly)
-    // So yes, those are actual zeroes, because we work with voxels/planes.
-    // (Do note that we need *both* ddx and ddy because floating point
-    //  instabilities occasionally reported multiple flat directions with only
-    //  ddx when looking at it from straight ahead. We can't have both unstable
-    //  at the same time.)
-    
-    float3 model_ddx = ddx(vertex_object_space);
-    float3 model_ddy = ddy(vertex_object_space);
-    float3 model_normal = normalize(cross(model_ddy, model_ddx));
-    // This *could* maybe be more efficient but *eh*.
-    if (model_normal.x > 0)
-        face = XPOS;
-    else if (model_normal.x < 0)
-        face = XNEG;
-    else if (model_normal.y > 0)
-        face = YPOS;
-    else if (model_normal.y < 0)
-        face = YNEG;
-    else if (model_normal.z > 0)
-        face = ZPOS;
+FACE getFace(float3 modelNormal) {
+    if (modelNormal.x > 0)
+        return XPOS;
+    else if (modelNormal.x < 0)
+        return XNEG;
+    else if (modelNormal.y > 0)
+        return YPOS;
+    else if (modelNormal.y < 0)
+        return YNEG;
+    else if (modelNormal.z > 0)
+        return ZPOS;
     else
-        face = ZNEG;
+        return ZNEG;
+}
 
-    float3 frac_obj_space = frac(vertex_object_space);
-    int3 flat = (frac(model_ddx) == 0) * (frac(model_ddy) == 0);
-    if (flat.z)
-        uv = frac_obj_space.xy;
-    else if (flat.y)
-        uv = frac_obj_space.xz;
-    else
-        uv = frac_obj_space.zy;
-    
-    // Because we're basing the UVs off world coordinates, both sides get the
-    // same uvs, which means that 3/6 have flipped uvs. Fix that.
+float2 getUVs(float3 modelNormal, float2 uv) {
+    FACE face = getFace(modelNormal);
+    uv = frac(uv);
+    if (face == ZPOS || face == ZNEG)
+        uv = uv.yx;
     if (face == XNEG || face == YNEG || face == ZPOS)
         uv.x = 1 - uv.x;
+    
+    uv.x = (uv.x + face) / 6;
+    return uv;
 }
