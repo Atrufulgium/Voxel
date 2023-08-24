@@ -18,7 +18,6 @@ namespace Atrufulgium.Voxel.Base {
         NativeList<Vertex> vertices = new(2 * (ushort.MaxValue + 1), Allocator.Persistent);
         NativeList<ushort> quads = new(ushort.MaxValue + 1, Allocator.Persistent);
         NativeParallelHashMap<Vertex, int> vertToIndex = new(ushort.MaxValue + 1, Allocator.Persistent);
-        NativeParallelHashMap<RectMaterialLayerTuple, RectMaterialLayerTuple> rects = new(64, Allocator.Persistent);
 
         /// <summary>
         /// <para>
@@ -55,7 +54,7 @@ namespace Atrufulgium.Voxel.Base {
 
         bool async = false;
         JobHandle handle;
-        ChunkMesherJob meshJob;
+        IGreedyMeshJob meshJob;
 
         /// <summary>
         /// <para>
@@ -77,17 +76,20 @@ namespace Atrufulgium.Voxel.Base {
             vertices.Clear();
             vertToIndex.Clear();
             quads.Clear();
-            meshJob = new ChunkMesherJob {
-                // Work on a copy to not have issues with race conditions.
-                // However, we need to also dispose this copy of course!
-                chunk = chunk.GetCopy(),
-                viewDir = viewDir,
-                vertices = vertices,
-                quads = quads,
-                vertToIndex = vertToIndex,
-                rects = rects
-            };
-            handle = meshJob.Schedule();
+            // todo: this causes boxing.
+            if (chunk.VoxelSize < 4)
+                meshJob = new GreedyChunkMesherJob();
+            else
+                meshJob = new GreedyChunkMesherJobSIMD();
+            meshJob.Chunk = chunk.GetCopy();
+            meshJob.ViewDir = viewDir;
+            meshJob.Vertices = vertices;
+            meshJob.Quads = quads;
+            meshJob.VertToIndex = vertToIndex;
+            if (chunk.VoxelSize < 4)
+                handle = ((GreedyChunkMesherJob)meshJob).Schedule();
+            else
+                handle = ((GreedyChunkMesherJobSIMD)meshJob).Schedule();
             async = true;
         }
 
@@ -110,7 +112,7 @@ namespace Atrufulgium.Voxel.Base {
             // call, but it does, so here we are.
             handle.Complete();
             // We were working on a copy.
-            meshJob.chunk.Dispose();
+            meshJob.Chunk.Dispose();
 
             if (oldMesh == null) {
                 mesh = new Mesh();
@@ -118,17 +120,17 @@ namespace Atrufulgium.Voxel.Base {
                 oldMesh.Clear();
                 mesh = oldMesh;
             }
-            mesh.SetVertexBufferParams(meshJob.vertices.Length, Vertex.Layout);
+            mesh.SetVertexBufferParams(meshJob.Vertices.Length, Vertex.Layout);
             // (Flag 15 supresses all messages)
-            mesh.SetVertexBufferData(meshJob.vertices.AsArray(), 0, 0, meshJob.vertices.Length, flags: (MeshUpdateFlags)15);
+            mesh.SetVertexBufferData(meshJob.Vertices.AsArray(), 0, 0, meshJob.Vertices.Length, flags: (MeshUpdateFlags)15);
 
-            mesh.SetIndexBufferParams(meshJob.quads.Length, IndexFormat.UInt16);
-            mesh.SetIndexBufferData(meshJob.quads.AsArray(), 0, 0, meshJob.quads.Length, flags: (MeshUpdateFlags)15);
+            mesh.SetIndexBufferParams(meshJob.Quads.Length, IndexFormat.UInt16);
+            mesh.SetIndexBufferData(meshJob.Quads.AsArray(), 0, 0, meshJob.Quads.Length, flags: (MeshUpdateFlags)15);
 
             mesh.subMeshCount = 1;
             // Do note: The docs (<=5.4 already though) note that quads are
             // often emulated. Is this still the case?
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, meshJob.quads.Length, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, meshJob.Quads.Length, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
 
             // Settings bounds sends an update mssage
             mesh.bounds = new(
@@ -145,7 +147,6 @@ namespace Atrufulgium.Voxel.Base {
             vertices.Dispose();
             quads.Dispose();
             vertToIndex.Dispose();
-            rects.Dispose();
         }
 
         public static void DisposeStatic() {

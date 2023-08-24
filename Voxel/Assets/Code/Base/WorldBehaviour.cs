@@ -35,15 +35,21 @@ namespace Atrufulgium.Voxel.Base {
 
         private void Update() {
             frame++;
+            if (frame <= 3) {
+                if (world.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
+                    ChunkMesher.GetMeshAsynchronously(key, chunk, 0);
+                }
+                return;
+            }
 
             int3 center = rng.NextInt3(-200, 200);
             center.y /= 20;
             ushort mat = 3;
             for (int i = 0; i < 200; i++) {
-                world.Set(center + rng.NextInt3(-4, 4), mat);
+                //world.Set(center + rng.NextInt3(-4, 4), mat);
             }
 
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 1000; i++) {
                 if (world.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
                     // If it's active already, put it at the end of the queue to
                     // try again later.
@@ -94,7 +100,7 @@ namespace Atrufulgium.Voxel.Base {
                         +  4 * Mathf.PerlinNoise(x /  4f, z /  4f)
                         +  8 * Mathf.PerlinNoise(x /  8f, z /  8f)
                         + 16 * Mathf.PerlinNoise(x / 16f, z / 16f);
-                    for (int y = -5; y < height - 10; y++)
+                    for (int y = -15; y < height - 10; y++)
                         world.Set(new(x, y, z), 2);
                     world.Set(new(x, (int)height - 10, z), 1);
                 }

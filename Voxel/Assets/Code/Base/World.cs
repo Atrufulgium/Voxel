@@ -30,7 +30,7 @@ namespace Atrufulgium.Voxel.Base {
         /// All chunks that have been modified whose modifications have only
         /// been applied to the voxel array and not the world yet.
         /// </summary>
-        readonly QueueSet<ChunkKey> dirtyChunks = new();
+        readonly PriorityQueueSet<ChunkKey, float> dirtyChunks = new();
 
         /// <summary>
         /// Sets a position in this region to a voxel material.
@@ -46,7 +46,7 @@ namespace Atrufulgium.Voxel.Base {
                 chunk[chunkPos] = material;
                 allChunks.Add(key, chunk);
             }
-            dirtyChunks.Enqueue(key);
+            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
         }
 
         /// <summary>
@@ -60,7 +60,7 @@ namespace Atrufulgium.Voxel.Base {
             } else {
                 allChunks.Add(key, chunk);
             }
-            dirtyChunks.Enqueue(key);
+            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
         }
 
         /// <summary>
@@ -73,7 +73,7 @@ namespace Atrufulgium.Voxel.Base {
             foreach (var (pos, _) in chunk) {
                 chunk[pos] = material;
             }
-            dirtyChunks.Enqueue(key);
+            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
         }
 
         /// <summary>
@@ -105,7 +105,7 @@ namespace Atrufulgium.Voxel.Base {
         /// Marks a given chunk to be dirty without any reason.
         /// </summary>
         public void MarkDirty(ChunkKey key) {
-            dirtyChunks.Enqueue(key);
+            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
         }
 
         /// <summary>

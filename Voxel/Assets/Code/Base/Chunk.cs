@@ -97,6 +97,15 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         /// <summary>
+        /// <inheritdoc cref="this[int4, int4, int4]"/>
+        /// <para>
+        /// The columns of the matrix represent the "x", "y", and "z" parts.
+        /// </para>
+        /// </summary>
+        public int4 this[int4x3 coords]
+            => this[coords.c0, coords.c1, coords.c2];
+
+        /// <summary>
         /// <para>
         /// Returns a new chunk with a worse detail level than currently.
         /// </para>
