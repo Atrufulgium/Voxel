@@ -1,7 +1,6 @@
 ﻿using System;
 using Unity.Burst;
 using Unity.Collections;
-using Unity.Jobs;
 using Unity.Mathematics;
 
 namespace Atrufulgium.Voxel.Base {
@@ -41,10 +40,13 @@ namespace Atrufulgium.Voxel.Base {
         LayerMode currentLayerMode;
         int scale;
         int max;
+        int4 sequential;
+        int TopLayer => 32 - scale;
 
         public void Execute() {
             scale = chunk.VoxelSize;
             max = chunk.VoxelsPerAxis;
+            sequential = new int4(0, 1, 2, 3);
 
             for (int i = 0; i < renderDirections.Length; i++) {
                 currentLayerMode = renderDirections[i];
@@ -58,7 +60,7 @@ namespace Atrufulgium.Voxel.Base {
             BitField32* handled = stackalloc BitField32[(int)math.ceil(max * max / 32f)];
             for (int y = 0; y < max; y += 1) {
                 for (int x = 0; x < max; x += 4) {
-                    int4 xvec = x + new int4(0,1,2,3);
+                    int4 xvec = x + sequential;
                     bool4 init = GetChunkSIMD(xvec, y, layer) == 0;
                     init |= IsCoveredSIMD(xvec, y, layer);
                     SetHandledSIMD(handled, x, y, init);
@@ -109,7 +111,7 @@ namespace Atrufulgium.Voxel.Base {
             int x2 = x;
             int mat = GetChunk(x, y, layer);
             for (; x2 < max; x2 += 4) {
-                int4 x2vec = x2 + new int4(0,1,2,3);
+                int4 x2vec = x2 + sequential;
                 bool4 isCovered = IsCoveredSIMD(x2vec, y, layer);
                 // Don't need after max, and isCovered is checked
                 // with both, so hacky: mask the after part in isCovered.
@@ -121,7 +123,9 @@ namespace Atrufulgium.Voxel.Base {
                 if (math.any(isHandled)) {
                     // Note that the problem can be any of the four.
                     // Current x2 assumes it's the first one.
-                    if (!isHandled.x && isHandled.y)
+                    if (isHandled.x)
+                        { }
+                    else if (isHandled.y)
                         x2++;
                     else if (isHandled.z)
                         x2 += 2;
@@ -133,7 +137,9 @@ namespace Atrufulgium.Voxel.Base {
                 bool4 wrongMat = mat != mat2;
                 wrongMat &= !isCovered;
                 if (math.any(wrongMat)) {
-                    if (!wrongMat.x && wrongMat.y)
+                    if (wrongMat.x)
+                        { }
+                    else if (wrongMat.y)
                         x2++;
                     else if (wrongMat.z)
                         x2 += 2;
@@ -150,7 +156,7 @@ namespace Atrufulgium.Voxel.Base {
             for (; y2 < max; y2++) {
                 bool validRow = true;
                 for (x2 = x; x2 < x + width; x2 += 4) {
-                    int4 x2vec = x2 + new int4(0, 1, 2, 3);
+                    int4 x2vec = x2 + sequential;
                     bool4 isCovered = IsCoveredSIMD(x2vec, y2, layer);
                     isCovered |= x2vec >= x + width;
                     if (math.all(isCovered))
@@ -177,7 +183,7 @@ namespace Atrufulgium.Voxel.Base {
             int height = y2 - y;
             for (y2 = y; y2 < y + height; y2++) {
                 for (x2 = x; x2 < x + width; x2 += 4) {
-                    int4 x2vec = x2 + new int4(0, 1, 2, 3);
+                    int4 x2vec = x2 + sequential;
                     bool4 isHandled = x2vec < x + width;
                     OrHandledSIMD(handled, x2, y2, isHandled);
                 }
@@ -193,11 +199,12 @@ namespace Atrufulgium.Voxel.Base {
 
         // These SIMD variants return bogus data when x >= max
         bool4 IsCoveredSIMD(int4 x, int4 y, int layer) {
-            if (layer >= max - 1)
+            if (layer >= TopLayer)
                 return false;
             int4 bogus = (int4)(x >= max);
             x *= (1 - bogus);
-            return GetChunkSIMD(x, y, layer + 1) > 0;
+            int4 mats = GetChunkSIMD(x, y, layer + scale);
+            return mats > 0;
         }
 
         unsafe bool GetHandled(BitField32* handled, int x, int y) {
@@ -207,48 +214,66 @@ namespace Atrufulgium.Voxel.Base {
 
         unsafe bool4 GetHandledSIMD(BitField32* handled, int x, int y) {
             int unrolledIndex = y * max + x;
+            int modVal = unrolledIndex % 32;
             // Can only fast-path when it fits.
-            if (x < max - 4) {
-                uint val = handled[unrolledIndex / 32].GetBits(unrolledIndex % 32, 4);
+            if (modVal < 32 - 4) {
+                uint val = handled[unrolledIndex / 32].GetBits(modVal, 4);
                 return (val & new uint4(1, 2, 4, 8)) >= 1;
             } else {
                 bool4 ret = default;
-                for (int i = 0; x + i < max; unrolledIndex++, i++) {
-                    ret[i] = handled[unrolledIndex / 32].IsSet(unrolledIndex % 32);
+                for(int i = 0; i < 4; i++) {
+                    if (x + i >= max)
+                        break;
+                    ret[i] = GetHandled(handled, x + i, y);
                 }
                 return ret;
             }
+        }
+
+        unsafe void SetHandled(BitField32* handled, int x, int y, bool value) {
+            int unrolledIndex = y * max + x;
+            handled[unrolledIndex / 32].SetBits(unrolledIndex % 32, value);
         }
 
         unsafe void SetHandledSIMD(BitField32* handled, int x, int y, bool4 value) {
             int unrolledIndex = y * max + x;
             int modVal = unrolledIndex % 32;
             // Can only fast-path when it fits.
+            // No "max" as this 32 is the size of BitField32, and not the chunk size.
+            if (modVal < 32 - 4) {
                 int divVal = unrolledIndex / 32;
-            if (modVal < max - 4) {
                 uint mask = ~(15u << modVal);
                 uint maskFilling = (uint)math.dot((int4)value, new int4(1, 2, 4, 8)) << modVal;
                 handled[divVal].Value = (handled[divVal].Value & mask) + maskFilling;
             } else {
-                for (int i = 0; x + i < max; unrolledIndex++, i++) {
-                    // Not using modVal/divVal because ^
-                    handled[unrolledIndex / 32].SetBits(unrolledIndex % 32, value[i]);
+                for (int i = 0; i < 4; i++) {
+                    if (x + i >= max)
+                        break;
+                    SetHandled(handled, x + i, y, value[i]);
                 }
             }
+        }
+
+        unsafe void OrHandled(BitField32* handled, int x, int y, bool value) {
+            int unrolledIndex = y * max + x;
+            int modVal = unrolledIndex % 32;
+            int divVal = unrolledIndex / 32;
+            value |= handled[divVal].IsSet(modVal);
+            handled[divVal].SetBits(modVal, value);
         }
 
         unsafe void OrHandledSIMD(BitField32* handled, int x, int y, bool4 value) {
             int unrolledIndex = y * max + x;
             int modVal = unrolledIndex % 32;
-            if (modVal < max - 4) {
+            if (modVal < 32 - 4) {
                 int divVal = unrolledIndex / 32;
                 uint maskFilling = (uint)math.dot((int4)value, new int4(1, 2, 4, 8)) << modVal;
                 handled[divVal].Value |= maskFilling;
             } else {
-                for (int i = 0; x + i < max; unrolledIndex++, i++) {
-                    modVal = unrolledIndex % 32;
-                    int divVal = unrolledIndex / 32;
-                    handled[divVal].SetBits(modVal, value[i] || handled[divVal].IsSet(modVal));
+                for (int i = 0; i < 4; i++) {
+                    if (x + i >= max)
+                        break;
+                    OrHandled(handled, x + i, y, value[i]);
                 }
             }
         }
@@ -268,7 +293,7 @@ namespace Atrufulgium.Voxel.Base {
 
         int3 LayerToCoord(int x, int y, int layer) {
             if (currentLayerMode >= LayerMode.XDown) {
-                layer = (max - 1) - layer;
+                layer = TopLayer - layer;
             }
             int3 ret = currentLayerMode switch {
                 LayerMode.XUp or LayerMode.XDown => new(x, y, layer),
@@ -281,7 +306,7 @@ namespace Atrufulgium.Voxel.Base {
 
         int4x3 LayerToCoordSIMD(int4 x, int4 y, int layer) {
             if (currentLayerMode >= LayerMode.XDown) {
-                layer = (max - 1) - layer;
+                layer = TopLayer - layer;
             }
             int4x3 ret = currentLayerMode switch {
                 LayerMode.XUp or LayerMode.XDown => new(x, y, layer),
@@ -298,7 +323,8 @@ namespace Atrufulgium.Voxel.Base {
         int4 GetChunkSIMD(int4 x, int4 y, int layer) {
             int4 bogus = (int4)(x >= max);
             x *= (1 - bogus);
-            return chunk[LayerToCoordSIMD(x, y, layer)];
+            var coords = LayerToCoordSIMD(x * scale, y * scale, layer);
+            return chunk[coords];
         }
 
         /// <summary>
