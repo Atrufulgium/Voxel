@@ -63,7 +63,9 @@ namespace Atrufulgium.Voxel.Base {
                 }
             }
 
+            int completionCount = 0;
             foreach(var key in ChunkMesher.GetAllCompletedJobs()) {
+                completionCount++;
                 if (!meshes.TryGetValue(key, out MeshFilter filter))
                     filter = CreateChunkMesh(key);
                 Mesh oldMesh = filter.mesh;
@@ -71,6 +73,8 @@ namespace Atrufulgium.Voxel.Base {
                     filter.mesh = newMesh;
                 }
             }
+            if (completionCount > 0)
+                Debug.Log($"Frame {frame}: {completionCount}");
         }
 
         private void OnDestroy() {
@@ -99,10 +103,13 @@ namespace Atrufulgium.Voxel.Base {
                         +  2 * Mathf.PerlinNoise(x /  2f, z /  2f)
                         +  4 * Mathf.PerlinNoise(x /  4f, z /  4f)
                         +  8 * Mathf.PerlinNoise(x /  8f, z /  8f)
-                        + 16 * Mathf.PerlinNoise(x / 16f, z / 16f);
+                        + 16 * Mathf.PerlinNoise(x / 16f, z / 16f)
+                        + Mathf.Abs(x/10)
+                        + Mathf.Abs(z/10);
+                    int LoD = Mathf.Clamp(Mathf.FloorToInt(new Vector2(x, z).magnitude / 100f), 0, 5);
                     for (int y = -15; y < height - 10; y++)
-                        world.Set(new(x, y, z), 2);
-                    world.Set(new(x, (int)height - 10, z), 1);
+                        world.Set(new(x, y, z), 2, LoD);
+                    world.Set(new(x, (int)height - 10, z), 1, LoD);
                 }
             }
         }

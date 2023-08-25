@@ -35,14 +35,18 @@ namespace Atrufulgium.Voxel.Base {
         /// <summary>
         /// Sets a position in this region to a voxel material.
         /// </summary>
-        public void Set(int3 position, ushort material) {
+        /// <param name="newLoD">
+        /// If a new chunk is introduced by this action, sets its LoD to this
+        /// value.
+        /// </param>
+        public void Set(int3 position, ushort material, int newLoD = 0) {
             ChunkKey key = ChunkKey.FromWorldPos(position, out int3 chunkPos);
             if (allChunks.TryGetValue(key, out Chunk chunk)) {
                 chunk[chunkPos] = material;
                 // No need to reupdate the Dictionary as we're changing a
                 // value of an underlying NativeCollection.
             } else {
-                chunk = new(0);
+                chunk = new(newLoD);
                 chunk[chunkPos] = material;
                 allChunks.Add(key, chunk);
             }
@@ -74,6 +78,17 @@ namespace Atrufulgium.Voxel.Base {
                 chunk[pos] = material;
             }
             dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
+        }
+
+        /// <summary>
+        /// Sets an existing chunk's LoD. Does nothing for nonexistent chunks.
+        /// </summary>
+        public void SetChunkLoD(ChunkKey key, int LoD) {
+            if (allChunks.TryGetValue(key, out Chunk chunk)) {
+                chunk = chunk.WithLoD(LoD);
+                allChunks[key] = chunk;
+                dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
+            }
         }
 
         /// <summary>

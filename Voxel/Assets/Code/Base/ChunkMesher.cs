@@ -41,10 +41,6 @@ namespace Atrufulgium.Voxel.Base {
         /// invisible faces gets culled, in the latter case no culling happens.
         /// A camera looking at the positive z direction has a viewDir (0,0,1).
         /// </param>
-        // TODO: proper impl and tl;dr of https://doi.org/10.1137/0402027
-        // Note that we also have a "don't care" region in nearly all planes as
-        // we don't care what covered voxels do. Taking into account OPT in
-        // this case seems nearly impossible.
         public Mesh GetMeshSynchronously(Chunk chunk, float3 viewDir = default) {
             GetMeshAsynchonously(chunk, viewDir);
             handle.Complete();
@@ -54,7 +50,7 @@ namespace Atrufulgium.Voxel.Base {
 
         bool async = false;
         JobHandle handle;
-        IGreedyMeshJob meshJob;
+        GreedyChunkMesherJob meshJob;
 
         /// <summary>
         /// <para>
@@ -71,25 +67,19 @@ namespace Atrufulgium.Voxel.Base {
         /// <inheritdoc cref="GetMeshSynchronously(Chunk, float3)"/>
         public void GetMeshAsynchonously(Chunk chunk, float3 viewDir = default) {
             if (async)
-                throw new InvalidOperationException("Cannot use the same ChunkMesher instance for multiple meshing tasks. Use multiple instances.");
+                throw new InvalidOperationException("Cannot use the same ChunkMesher instance for multiple meshing tasks. Use multiple instances. Try using the static ChunkMesher.GetMeshAsynchronously.");
 
             vertices.Clear();
             vertToIndex.Clear();
             quads.Clear();
-            // todo: this causes boxing.
-            if (chunk.VoxelSize < 4)
-                meshJob = new GreedyChunkMesherJob();
-            else
-                meshJob = new GreedyChunkMesherJobSIMD();
-            meshJob.Chunk = chunk.GetCopy();
-            meshJob.ViewDir = viewDir;
-            meshJob.Vertices = vertices;
-            meshJob.Quads = quads;
-            meshJob.VertToIndex = vertToIndex;
-            if (chunk.VoxelSize < 4)
-                handle = ((GreedyChunkMesherJob)meshJob).Schedule();
-            else
-                handle = ((GreedyChunkMesherJobSIMD)meshJob).Schedule();
+            meshJob = new GreedyChunkMesherJob {
+                chunk = chunk.GetCopy(),
+                viewDir = viewDir,
+                vertices = vertices,
+                quads = quads,
+                vertToIndex = vertToIndex
+            };
+            handle = meshJob.Schedule();
             async = true;
         }
 
@@ -112,7 +102,7 @@ namespace Atrufulgium.Voxel.Base {
             // call, but it does, so here we are.
             handle.Complete();
             // We were working on a copy.
-            meshJob.Chunk.Dispose();
+            meshJob.chunk.Dispose();
 
             if (oldMesh == null) {
                 mesh = new Mesh();
@@ -120,17 +110,17 @@ namespace Atrufulgium.Voxel.Base {
                 oldMesh.Clear();
                 mesh = oldMesh;
             }
-            mesh.SetVertexBufferParams(meshJob.Vertices.Length, Vertex.Layout);
+            mesh.SetVertexBufferParams(meshJob.vertices.Length, Vertex.Layout);
             // (Flag 15 supresses all messages)
-            mesh.SetVertexBufferData(meshJob.Vertices.AsArray(), 0, 0, meshJob.Vertices.Length, flags: (MeshUpdateFlags)15);
+            mesh.SetVertexBufferData(meshJob.vertices.AsArray(), 0, 0, meshJob.vertices.Length, flags: (MeshUpdateFlags)15);
 
-            mesh.SetIndexBufferParams(meshJob.Quads.Length, IndexFormat.UInt16);
-            mesh.SetIndexBufferData(meshJob.Quads.AsArray(), 0, 0, meshJob.Quads.Length, flags: (MeshUpdateFlags)15);
+            mesh.SetIndexBufferParams(meshJob.quads.Length, IndexFormat.UInt16);
+            mesh.SetIndexBufferData(meshJob.quads.AsArray(), 0, 0, meshJob.quads.Length, flags: (MeshUpdateFlags)15);
 
             mesh.subMeshCount = 1;
             // Do note: The docs (<=5.4 already though) note that quads are
             // often emulated. Is this still the case?
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, meshJob.Quads.Length, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, meshJob.quads.Length, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
 
             // Settings bounds sends an update mssage
             mesh.bounds = new(
@@ -172,6 +162,9 @@ namespace Atrufulgium.Voxel.Base {
         /// <inheritdoc cref="GetMeshAsynchonously(Chunk, float3)"/>
         /// <param name="key"> The unique identifier of this meshing job. </param>
         public static void GetMeshAsynchronously(ChunkKey key, Chunk chunk, float3 viewDir = default) {
+            if (JobExists(key))
+                throw new ArgumentException("The given key already has an associated job, so it cannot have a new one.");
+
             ChunkMesher mesher;
             if (idleMeshers.Count == 0) {
                 mesher = new();

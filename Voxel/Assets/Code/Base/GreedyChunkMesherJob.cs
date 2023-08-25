@@ -7,26 +7,57 @@ using Unity.Mathematics;
 namespace Atrufulgium.Voxel.Base {
 
     [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
-    struct GreedyChunkMesherJob : IGreedyMeshJob {
+    struct GreedyChunkMesherJob : IJob {
 
-        Chunk IGreedyMeshJob.Chunk { get => chunk; set => chunk = value; }
+        /// <summary>
+        /// The chunk to turn into a mesh. Of course, this takes into account
+        /// the chunks LoD.
+        /// </summary>
         [ReadOnly]
-        Chunk chunk;
+        internal Chunk chunk;
 
-        float3 IGreedyMeshJob.ViewDir { get => viewDir; set => viewDir = value; }
+        /// <summary>
+        /// Either a normalised vector representing the camera direction in the
+        /// chunk's model space, or the zero vector. In the former case, all
+        /// invisible faces gets culled, in the latter case no culling happens.
+        /// A camera looking at the positive z direction has a viewDir (0,0,1).
+        /// </summary>
         [ReadOnly]
-        float3 viewDir;
+        internal float3 viewDir;
 
-        NativeList<Vertex> IGreedyMeshJob.Vertices { get => vertices; set => vertices = value; }
+        /// <summary>
+        /// All verts in the current GetMesh call.
+        /// </summary>
         [WriteOnly]
-        NativeList<Vertex> vertices;
+        internal NativeList<Vertex> vertices;
 
-        NativeList<ushort> IGreedyMeshJob.Quads { get => quads; set => quads = value; }
+        /// <summary>
+        /// I'd call it "tris" if my topology wasn't quads. The indices of the
+        /// four corners of quads inside the vertices list in the current
+        /// GetMesh call.
+        /// </summary>
+        /// <remarks>
+        /// ushorts are *not* sufficient. You can construct a 28x28x28 3d
+        /// checkerboard pattern of "air / non-air" with no two diagonally
+        /// touching non-air blocks of the same material. However, this
+        /// requires 11k well-placed blocks (in a "place two break one" way)
+        /// out of the maximum of 16k blocks that can induce 6 verts.
+        /// Anyone who achieves that *deserves* the broken physics and
+        /// graphics they desire.
+        /// </remarks>
         [WriteOnly]
-        NativeList<ushort> quads;
+        internal NativeList<ushort> quads;
 
-        NativeParallelHashMap<Vertex, int> IGreedyMeshJob.VertToIndex { get => vertToIndex; set => vertToIndex = value; }
-        NativeParallelHashMap<Vertex, int> vertToIndex;
+        /// <summary>
+        /// <para>
+        /// A conversion from vertex to index inside the vertices list in the
+        /// current GetMesh call.
+        /// </para>
+        /// <para>
+        /// This is needed to weld together vertices of the same material.
+        /// </para>
+        /// </summary>
+        internal NativeParallelHashMap<Vertex, int> vertToIndex;
 
         static readonly LayerMode[] renderDirections = new[] {
             LayerMode.XUp, LayerMode.YUp, LayerMode.ZUp,
@@ -36,6 +67,10 @@ namespace Atrufulgium.Voxel.Base {
         LayerMode currentLayerMode;
         int scale;
         int max;
+        /// <summary>
+        /// The highest layer in the current pass.
+        /// </summary>
+        int TopLayer => 32 - scale;
 
         public void Execute() {
             scale = chunk.VoxelSize;
@@ -57,17 +92,16 @@ namespace Atrufulgium.Voxel.Base {
             // have overlapping rectangles (or way too many).
             BitField32* handled = stackalloc BitField32[(int)math.ceil(max * max / 32f)];
             // Init to false, except for air and covereds.
-            for (int y = 0; y < max; y += 1) {
-                for (int x = 0; x < max; x += 1) {
-                    bool init = false;
-                    init |= GetChunk(x, y, layer) == 0;
+            for (int y = 0; y < max; y++) {
+                for (int x = 0; x < max; x++) {
+                    bool init = GetChunk(x, y, layer) == 0;
                     init |= IsCovered(x, y, layer);
                     SetHandled(handled, x, y, init);
                 }
             }
 
-            for (int y = 0; y < max; y += 1) {
-                for (int x = 0; x < max; x += 1) {
+            for (int y = 0; y < max; y++) {
+                for (int x = 0; x < max; x++) {
                     // If yet unhandled, grow as far as possible
                     // horizontally, and then vertically.
                     if (!GetHandled(handled, x, y)) {
@@ -125,10 +159,6 @@ namespace Atrufulgium.Voxel.Base {
             int x2 = x;
             int mat = GetChunk(x, y, layer);
             for (; x2 < max; x2++) {
-                bool isCovered = IsCovered(x2, y, layer);
-                if (isCovered)
-                    continue; // Covered allows anything.
-
                 bool isHandled = GetHandled(handled, x2, y);
                 if (isHandled) {
                     // Don't overlap rects
@@ -150,10 +180,6 @@ namespace Atrufulgium.Voxel.Base {
 
                 // Unfortunate near-copypasta of the above
                 for (x2 = x; x2 < x + width; x2++) {
-                    bool isCovered = IsCovered(x2, y2, layer);
-                    if (isCovered)
-                        continue;
-
                     bool isHandled = GetHandled(handled, x2, y2);
                     if (isHandled) {
                         validRow = false;
@@ -192,9 +218,9 @@ namespace Atrufulgium.Voxel.Base {
         /// by something else.
         /// </summary>
         bool IsCovered(int x, int y, int layer) {
-            if (layer >= max - 1)
+            if (layer >= TopLayer)
                 return false;
-            return GetChunk(x, y, layer + 1) > 0;
+            return GetChunk(x, y, layer + scale) > 0;
         }
 
         unsafe bool GetHandled(BitField32* handled, int x, int y) {
@@ -221,8 +247,11 @@ namespace Atrufulgium.Voxel.Base {
         };
 
         int3 LayerToCoord(int x, int y, int layer) {
+            // Layer is unnormalized to [0,max) and instead has gaps.
+            // So do not involve max in this calculation as we live in [0,32).
+            // Do note the "scale" to keep on the grid.
             if (currentLayerMode >= LayerMode.XDown) {
-                layer = (max - 1) - layer;
+                layer = TopLayer - layer;
             }
             int3 ret = currentLayerMode switch {
                 LayerMode.XUp or LayerMode.XDown => new(x, y, layer),

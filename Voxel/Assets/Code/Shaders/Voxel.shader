@@ -56,7 +56,7 @@ Shader "Custom/Voxel"
             Name "ShadowCaster"
             Tags { "LightMode" = "ShadowCaster" }
 
-            Cull Off
+            Cull Back
             ZWrite On
             ZTest LEqual
 
