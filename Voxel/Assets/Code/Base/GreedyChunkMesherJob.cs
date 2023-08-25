@@ -1,11 +1,13 @@
 ﻿using System;
 using Unity.Burst;
+using Unity.Burst.CompilerServices;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 
 namespace Atrufulgium.Voxel.Base {
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE1006:Naming Styles", Justification = "Burst!")]
     [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
     struct GreedyChunkMesherJob : IJob {
 
@@ -57,6 +59,9 @@ namespace Atrufulgium.Voxel.Base {
         /// This is needed to weld together vertices of the same material.
         /// </para>
         /// </summary>
+        // This one is _quite_ heavy in the generated assembly.
+        // Doing something else would be much preffered. Perhaps it is helpful
+        // that a position can have at most 4 materials.
         internal NativeParallelHashMap<Vertex, int> vertToIndex;
 
         static readonly LayerMode[] renderDirections = new[] {
@@ -65,27 +70,45 @@ namespace Atrufulgium.Voxel.Base {
         };
 
         LayerMode currentLayerMode;
-        int scale;
-        int max;
+
+        // burst
+        // like
+        // pls
+        int scale => _BurstScaleValue();
+        [return:AssumeRange(0,31)]
+        int _BurstScaleValue() => _burstScaleValue;
+        int _burstScaleValue;
+
+        int max => _BurstMaxValue();
+        [return:AssumeRange(0,31)]
+        int _BurstMaxValue() => _burstMaxValue;
+        int _burstMaxValue;
+
         /// <summary>
         /// The highest layer in the current pass.
         /// </summary>
-        int TopLayer => 32 - scale;
+        int TopLayer => _BurstTopPlayerValue();
+        [return:AssumeRange(0,31)]
+        int _BurstTopPlayerValue() => _burstTopLayerValue;
+        int _burstTopLayerValue;
+
 
         public void Execute() {
-            scale = chunk.VoxelSize;
-            max = chunk.VoxelsPerAxis;
+            _burstScaleValue = chunk.VoxelSize;
+            _burstMaxValue = chunk.VoxelsPerAxis;
+            _burstTopLayerValue = 32 - scale;
 
             for (int i = 0; i < renderDirections.Length; i++) {
                 currentLayerMode = renderDirections[i];
                 // TODO: the viewdir part.
-                for (int layer = 0; layer < Chunk.ChunkSize; layer += chunk.VoxelSize) {
+                for (int layer = 0; layer < Chunk.ChunkSize; layer += scale) {
                     HandleLayer(layer);
                 }
             }
         }
 
-        unsafe void HandleLayer(int layer) {
+        [SkipLocalsInit] // Tells Burst to not zero-set stackallocs
+        unsafe void HandleLayer([AssumeRange(0,31)] int layer) {
             // Assuming 32 ChunkSize.
             // This is 128B of stack space at most.
             // This keeps track of every rect we've written in order to not
@@ -104,7 +127,7 @@ namespace Atrufulgium.Voxel.Base {
                 for (int x = 0; x < max; x++) {
                     // If yet unhandled, grow as far as possible
                     // horizontally, and then vertically.
-                    if (!GetHandled(handled, x, y)) {
+                    if (Hint.Unlikely(!GetHandled(handled, x, y))) {
                         var rect = GrowRect(handled, x, y, layer);
                         CreateQuad(rect, layer);
                     }
@@ -112,7 +135,8 @@ namespace Atrufulgium.Voxel.Base {
             }
         }
 
-        unsafe void CreateQuad(RectMat rect, int layer) {
+        [SkipLocalsInit]
+        unsafe void CreateQuad(RectMat rect, [AssumeRange(0,31)] int layer) {
             int2* corners = stackalloc int2[4];
 
             // The order matters depending on which side of course.
@@ -140,7 +164,7 @@ namespace Atrufulgium.Voxel.Base {
                     rect.material
                 );
 
-                if (!vertToIndex.TryGetValue(vert, out int index)) {
+                if (Hint.Likely(!vertToIndex.TryGetValue(vert, out int index))) {
                     index = vertToIndex.Count();
                     vertices.Add(vert);
                     vertToIndex.Add(vert, index);
@@ -155,13 +179,17 @@ namespace Atrufulgium.Voxel.Base {
         /// <paramref name="handled"/> bitfields as needed. Returns the
         /// resulting rectangle.
         /// </summary>
-        unsafe RectMat GrowRect(BitField32* handled, int x, int y, int layer) {
+        unsafe RectMat GrowRect(BitField32* handled,
+            [AssumeRange(0,31)] int x,
+            [AssumeRange(0,31)] int y,
+            [AssumeRange(0,31)] int layer
+        ) {
             int x2 = x;
             int mat = GetChunk(x, y, layer);
             for (; x2 < max; x2++) {
                 bool isHandled = GetHandled(handled, x2, y);
                 if (isHandled) {
-                    // Don't overlap rects
+                    // Don't overlap rects or touch air/covereds
                     break;
                 }
 
@@ -204,31 +232,44 @@ namespace Atrufulgium.Voxel.Base {
                     SetHandled(handled, x2, y2, true);
             }
 
-            return new() {
-                x = (byte)x,
-                y = (byte)y,
-                width = (byte)width,
-                height = (byte)height,
-                material = (byte)mat
-            };
+            return new(
+                (byte)x,
+                (byte)y,
+                (byte)width,
+                (byte)height,
+                (ushort)mat
+            );
         }
 
         /// <summary>
         /// Whether rects can do anything they want to as they're covered
         /// by something else.
         /// </summary>
-        bool IsCovered(int x, int y, int layer) {
-            if (layer >= TopLayer)
+        bool IsCovered(
+            [AssumeRange(0,31)] int x,
+            [AssumeRange(0,31)] int y,
+            [AssumeRange(0,31)] int layer
+        ) {
+            if (Hint.Unlikely(layer == TopLayer))
                 return false;
             return GetChunk(x, y, layer + scale) > 0;
         }
 
-        unsafe bool GetHandled(BitField32* handled, int x, int y) {
+        unsafe bool GetHandled(
+            BitField32* handled,
+            [AssumeRange(0,31)] int x,
+            [AssumeRange(0,31)] int y
+        ) {
             int unrolledIndex = y * max + x;
             return handled[unrolledIndex / 32].IsSet(unrolledIndex % 32);
         }
 
-        unsafe void SetHandled(BitField32* handled, int x, int y, bool value) {
+        unsafe void SetHandled(
+            BitField32* handled,
+            [AssumeRange(0,31)] int x,
+            [AssumeRange(0,31)] int y,
+            bool value
+        ) {
             int unrolledIndex = y * max + x;
             handled[unrolledIndex / 32].SetBits(unrolledIndex % 32, value);
         }
@@ -246,7 +287,11 @@ namespace Atrufulgium.Voxel.Base {
             ZDown = 5
         };
 
-        int3 LayerToCoord(int x, int y, int layer) {
+        int3 LayerToCoord(
+            [AssumeRange(0,32)] int x,
+            [AssumeRange(0,32)] int y,
+            [AssumeRange(0,31)] int layer
+        ) {
             // Layer is unnormalized to [0,max) and instead has gaps.
             // So do not involve max in this calculation as we live in [0,32).
             // Do note the "scale" to keep on the grid.
@@ -262,8 +307,11 @@ namespace Atrufulgium.Voxel.Base {
             return ret;
         }
 
-        ushort GetChunk(int x, int y, int layer)
-            => chunk[LayerToCoord(x * scale, y * scale, layer)];
+        ushort GetChunk(
+            [AssumeRange(0,31)] int x,
+            [AssumeRange(0,31)] int y,
+            [AssumeRange(0,31)] int layer
+        ) => chunk[LayerToCoord(x * scale, y * scale, layer)];
 
         /// <summary>
         /// <para>
@@ -278,12 +326,34 @@ namespace Atrufulgium.Voxel.Base {
         /// <remarks>
         /// Assumes <see cref="Chunk.ChunkSize"/> is at most 256.
         /// </remarks>
-        struct RectMat : IEquatable<RectMat> {
-            public byte x;
-            public byte y;
-            public byte width;
-            public byte height;
-            public ushort material;
+        readonly struct RectMat : IEquatable<RectMat> {
+            public byte x { get => _BurstXValue(); }
+            public byte y { get => _BurstYValue(); }
+            public byte width { get => _BurstWidthValue(); }
+            public byte height { get => _BurstHeightValue(); }
+            public readonly ushort material;
+
+            // burst pls part II electric boogaloo
+            [return: AssumeRange(0ul,31ul)]
+            byte _BurstXValue() => _burstXValue;
+            [return: AssumeRange(0ul,31ul)]
+            byte _BurstYValue() => _burstYValue;
+            [return: AssumeRange(0ul,32ul)]
+            byte _BurstWidthValue() => _burstWidthValue;
+            [return: AssumeRange(0ul,32ul)]
+            byte _BurstHeightValue() => _burstHeightValue;
+            readonly byte _burstXValue;
+            readonly byte _burstYValue;
+            readonly byte _burstWidthValue;
+            readonly byte _burstHeightValue;
+
+            public RectMat(byte x, byte y, byte width, byte height, ushort material) {
+                _burstXValue = x;
+                _burstYValue = y;
+                _burstWidthValue = width;
+                _burstHeightValue = height;
+                this.material = material;
+            }
 
             public bool Equals(RectMat other)
                 => x == other.x
