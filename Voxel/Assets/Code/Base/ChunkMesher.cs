@@ -15,9 +15,17 @@ namespace Atrufulgium.Voxel.Base {
     /// </summary>
     public class ChunkMesher : IDisposable {
 
-        NativeList<Vertex> vertices = new(2 * (ushort.MaxValue + 1), Allocator.Persistent);
-        NativeList<ushort> quads = new(ushort.MaxValue + 1, Allocator.Persistent);
-        NativeParallelHashMap<Vertex, int> vertToIndex = new(ushort.MaxValue + 1, Allocator.Persistent);
+        public const int MAXVERTICES = ushort.MaxValue;
+        // Every quad needs to be adjacent to air. The optimum is achieved
+        // with well-placed 50% fill-rate. This has 32^3 * 0.5 * 6 quads.
+        // However, this breaks down earlier at 28^3 due to the vertex limit.
+        // So in effect, it's at most 28^3 * 0.5 * 6
+        public const int MAXQUADS = 65856;
+
+        NativeArray<Vertex> vertices = new(MAXVERTICES, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+        NativeArray<ushort> quads = new(MAXQUADS, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+        NativeReference<int> quadsLength = new(Allocator.Persistent);
+        NativeParallelHashMap<Vertex, int> vertToIndex = new(MAXVERTICES, Allocator.Persistent);
 
         /// <summary>
         /// <para>
@@ -69,14 +77,13 @@ namespace Atrufulgium.Voxel.Base {
             if (async)
                 throw new InvalidOperationException("Cannot use the same ChunkMesher instance for multiple meshing tasks. Use multiple instances. Try using the static ChunkMesher.GetMeshAsynchronously.");
 
-            vertices.Clear();
             vertToIndex.Clear();
-            quads.Clear();
             meshJob = new GreedyChunkMesherJob {
                 chunk = chunk.GetCopy(),
                 viewDir = viewDir,
                 vertices = vertices,
                 quads = quads,
+                quadsLength = quadsLength,
                 vertToIndex = vertToIndex
             };
             handle = meshJob.Schedule();
@@ -110,17 +117,21 @@ namespace Atrufulgium.Voxel.Base {
                 oldMesh.Clear();
                 mesh = oldMesh;
             }
-            mesh.SetVertexBufferParams(meshJob.vertices.Length, Vertex.Layout);
-            // (Flag 15 supresses all messages)
-            mesh.SetVertexBufferData(meshJob.vertices.AsArray(), 0, 0, meshJob.vertices.Length, flags: (MeshUpdateFlags)15);
 
-            mesh.SetIndexBufferParams(meshJob.quads.Length, IndexFormat.UInt16);
-            mesh.SetIndexBufferData(meshJob.quads.AsArray(), 0, 0, meshJob.quads.Length, flags: (MeshUpdateFlags)15);
+            int vertCount = meshJob.vertToIndex.Count();
+            int quadCount = meshJob.quadsLength.Value;
+
+            mesh.SetVertexBufferParams(vertCount, Vertex.Layout);
+            // (Flag 15 supresses all messages)
+            mesh.SetVertexBufferData(meshJob.vertices, 0, 0, vertCount, flags: (MeshUpdateFlags)15);
+
+            mesh.SetIndexBufferParams(quadCount, IndexFormat.UInt16);
+            mesh.SetIndexBufferData(meshJob.quads, 0, 0, quadCount, flags: (MeshUpdateFlags)15);
 
             mesh.subMeshCount = 1;
             // Do note: The docs (<=5.4 already though) note that quads are
             // often emulated. Is this still the case?
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, meshJob.quads.Length, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, quadCount, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
 
             // Settings bounds sends an update mssage
             mesh.bounds = new(
@@ -136,6 +147,7 @@ namespace Atrufulgium.Voxel.Base {
         public void Dispose() {
             vertices.Dispose();
             quads.Dispose();
+            quadsLength.Dispose();
             vertToIndex.Dispose();
         }
 

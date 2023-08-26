@@ -30,8 +30,11 @@ namespace Atrufulgium.Voxel.Base {
         /// <summary>
         /// All verts in the current GetMesh call.
         /// </summary>
+        /// <remarks>
+        /// Vertex count can be read from <see cref="vertToIndex"/>'s Count().
+        /// </remarks>
         [WriteOnly]
-        internal NativeList<Vertex> vertices;
+        internal NativeArray<Vertex> vertices;
 
         /// <summary>
         /// I'd call it "tris" if my topology wasn't quads. The indices of the
@@ -48,7 +51,17 @@ namespace Atrufulgium.Voxel.Base {
         /// graphics they desire.
         /// </remarks>
         [WriteOnly]
-        internal NativeList<ushort> quads;
+        internal NativeArray<ushort> quads;
+        /// <summary>
+        /// The part [0,quadCount) part of <see cref="quads"/> is filled with
+        /// sensible data, the rest is old or garbage.
+        /// </summary>
+        /// <remarks>
+        /// Don't read from this inside the job.
+        /// </remarks>
+        [WriteOnly]
+        internal NativeReference<int> quadsLength;
+        int quadCount;
 
         /// <summary>
         /// <para>
@@ -59,9 +72,8 @@ namespace Atrufulgium.Voxel.Base {
         /// This is needed to weld together vertices of the same material.
         /// </para>
         /// </summary>
-        // This one is _quite_ heavy in the generated assembly.
-        // Doing something else would be much preffered. Perhaps it is helpful
-        // that a position can have at most 4 materials.
+        // Can't whip up a datastructure that beats this comfortably in an
+        // afternoon. Let's leave it at this, how disappointing that may be.
         internal NativeParallelHashMap<Vertex, int> vertToIndex;
 
         static readonly LayerMode[] renderDirections = new[] {
@@ -97,6 +109,7 @@ namespace Atrufulgium.Voxel.Base {
             _burstScaleValue = chunk.VoxelSize;
             _burstMaxValue = chunk.VoxelsPerAxis;
             _burstTopLayerValue = 32 - scale;
+            quadCount = 0;
 
             for (int i = 0; i < renderDirections.Length; i++) {
                 currentLayerMode = renderDirections[i];
@@ -105,6 +118,7 @@ namespace Atrufulgium.Voxel.Base {
                     HandleLayer(layer);
                 }
             }
+            quadsLength.Value = quadCount;
         }
 
         [SkipLocalsInit] // Tells Burst to not zero-set stackallocs
@@ -139,19 +153,23 @@ namespace Atrufulgium.Voxel.Base {
         unsafe void CreateQuad(RectMat rect, [AssumeRange(0,31)] int layer) {
             int2* corners = stackalloc int2[4];
 
+            int4 minmax = new(rect.x, rect.y, rect.x, rect.y);
+            minmax.zw += new int2(rect.width, rect.height);
             // The order matters depending on which side of course.
+            corners[0] = minmax.zy; //new(rect.x + rect.width, rect.y);
+            corners[1] = minmax.zw; //new(rect.x + rect.width, rect.y + rect.height);
+            corners[2] = minmax.xw; //new(rect.x, rect.y + rect.height);
+            corners[3] = minmax.xy; //new(rect.x, rect.y);
             if (currentLayerMode < LayerMode.XDown) {
-                corners[0] = new(rect.x + rect.width, rect.y);
-                corners[1] = new(rect.x + rect.width, rect.y + rect.height);
-                corners[2] = new(rect.x, rect.y + rect.height);
-                corners[3] = new(rect.x, rect.y);
                 // Want the voxels to have volume, so shift up.
                 layer += scale;
             } else {
-                corners[3] = new(rect.x + rect.width, rect.y);
-                corners[2] = new(rect.x + rect.width, rect.y + rect.height);
-                corners[1] = new(rect.x, rect.y + rect.height);
-                corners[0] = new(rect.x, rect.y);
+                // Make it so that corners[0] <-> corners[3] and corners[1] <-> corners[2]
+                // Luckily int2 and int4 have predictable layout lol
+                int4* hacky = (int4*)corners;
+                int4 temp = hacky[0];
+                hacky[0] = hacky[1].zwxy;
+                hacky[1] = temp.zwxy;
             }
 
             // Register verts if they don't exist, and add to the quads list.
@@ -164,13 +182,22 @@ namespace Atrufulgium.Voxel.Base {
                     rect.material
                 );
 
-                if (Hint.Likely(!vertToIndex.TryGetValue(vert, out int index))) {
+                // Ignore everything that does not fit. It's extremely hard to
+                // achieve in natural gameplay to hit this.
+                if (Hint.Likely(!vertToIndex.TryGetValue(vert, out var index))) {
                     index = vertToIndex.Count();
-                    vertices.Add(vert);
-                    vertToIndex.Add(vert, index);
+                    if (Hint.Likely(index != ChunkMesher.MAXVERTICES)) {
+                        vertices[index] = vert;
+                        vertToIndex.Add(vert, (ushort)index);
+                    } else {
+                        index = 0;
+                    }
                 }
 
-                quads.Add((ushort)index);
+                if (Hint.Likely(quadCount != ChunkMesher.MAXQUADS)) {
+                    quads[quadCount] = (ushort)index;
+                    quadCount++;
+                }
             }
         }
 
@@ -189,7 +216,7 @@ namespace Atrufulgium.Voxel.Base {
             for (; x2 < max; x2++) {
                 bool isHandled = GetHandled(handled, x2, y);
                 if (isHandled) {
-                    // Don't overlap rects or touch air/covereds
+                    // Don't overlap rects or air/covereds
                     break;
                 }
 
@@ -292,18 +319,19 @@ namespace Atrufulgium.Voxel.Base {
             [AssumeRange(0,32)] int y,
             [AssumeRange(0,31)] int layer
         ) {
+            Hint.Assume(currentLayerMode >= LayerMode.XUp && currentLayerMode <= LayerMode.ZDown);
             // Layer is unnormalized to [0,max) and instead has gaps.
             // So do not involve max in this calculation as we live in [0,32).
             // Do note the "scale" to keep on the grid.
             if (currentLayerMode >= LayerMode.XDown) {
                 layer = TopLayer - layer;
             }
-            int3 ret = currentLayerMode switch {
-                LayerMode.XUp or LayerMode.XDown => new(x, y, layer),
-                LayerMode.YUp or LayerMode.YDown => new(y, layer, x),
-                LayerMode.ZUp or LayerMode.ZDown => new(layer, x, y),
-                _ => default
-            };
+            int3 ret = new(x, y, layer);
+            var mod = (int)currentLayerMode % 3;
+            if (mod == 1)
+                ret = ret.yzx;
+            if (mod == 2)
+                ret = ret.zxy;
             return ret;
         }
 

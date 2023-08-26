@@ -108,7 +108,7 @@ namespace Atrufulgium.Voxel.Base {
                         + Mathf.Abs(z/10);
                     int LoD = Mathf.Clamp(Mathf.FloorToInt(new Vector2(x, z).magnitude / 100f), 0, 5);
                     for (int y = -15; y < height - 10; y++)
-                        world.Set(new(x, y, z), 2, LoD);
+                        world.Set(new(x, y, z), 2, 0);
                     world.Set(new(x, (int)height - 10, z), 1, LoD);
                 }
             }
