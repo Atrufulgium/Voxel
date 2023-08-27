@@ -74,6 +74,9 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         // Can't whip up a datastructure that beats this comfortably in an
         // afternoon. Let's leave it at this, how disappointing that may be.
+        // Also: just ditching this and having every vertex unique works fine
+        // (approximately 7% quicker), but then the 28x28x28 case is achieved
+        // _much_ quicker. (And there's 160% more verts, but my verts are tiny.)
         internal NativeParallelHashMap<Vertex, int> vertToIndex;
 
         static readonly LayerMode[] renderDirections = new[] {
@@ -87,12 +90,12 @@ namespace Atrufulgium.Voxel.Base {
         // like
         // pls
         int scale => _BurstScaleValue();
-        [return:AssumeRange(0,31)]
+        [return:AssumeRange(1,32)]
         int _BurstScaleValue() => _burstScaleValue;
         int _burstScaleValue;
 
         int max => _BurstMaxValue();
-        [return:AssumeRange(0,31)]
+        [return:AssumeRange(1,32)]
         int _BurstMaxValue() => _burstMaxValue;
         int _burstMaxValue;
 
@@ -121,36 +124,76 @@ namespace Atrufulgium.Voxel.Base {
             quadsLength.Value = quadCount;
         }
 
+        struct RectData {
+            public uint rectStarts;
+            public uint noRects;
+
+            public RectData(uint rectStarts, uint noRects) {
+                this.rectStarts = rectStarts;
+                this.noRects = noRects;
+            }
+        }
+
         [SkipLocalsInit] // Tells Burst to not zero-set stackallocs
         unsafe void HandleLayer([AssumeRange(0,31)] int layer) {
             // Assuming 32 ChunkSize.
-            // This is 128B of stack space at most.
-            // This keeps track of every rect we've written in order to not
-            // have overlapping rectangles (or way too many).
-            BitField32* handled = stackalloc BitField32[(int)math.ceil(max * max / 32f)];
-            // Init to false, except for air and covereds.
+            // This is 256B of stack space at most.
+            // "rectStarts" is set to 1 whenever a rectangle should start.
+            // Slowly loses bits after initialisation.
+            // "noRects" is set to 1 whenever a rectangle is illegal:
+            // air, and covered spaces.
+            // (And after initialisation, other rects.)
+
+            // Note: data is counted from the MSB = 0.
+            // This is because "reverseBits" is kinda tragic and I don't
+            // really need it.
+            RectData* rectData = stackalloc RectData[max];
+
             for (int y = 0; y < max; y++) {
+                uint noRectsVal = 0;
+
+                // This keeps track of everywhere the material changes. If the
+                // materials are
+                //     0000 0011 1112 2220 0012 3443 3333 0000
+                // this wil have set bits
+                //     ____ __1_ ___1 ___1 __11 11_1 ____ 1___
+                uint changedVal = 0;
+
+                ushort prevMat = ushort.MaxValue;
+                bool prevCovered = false;
                 for (int x = 0; x < max; x++) {
-                    bool init = GetChunk(x, y, layer) == 0;
-                    init |= IsCovered(x, y, layer);
-                    SetHandled(handled, x, y, init);
+                    changedVal <<= 1;
+                    noRectsVal <<= 1;
+                    ushort mat = GetChunk(x, y, layer);
+                    bool covered = IsCovered(x, y, layer);
+
+                    // Count going covered <-> uncovered as change that
+                    // requires a new rect to start.
+                    changedVal |= math.select(0u, 1u, mat != prevMat | covered != prevCovered);
+
+                    // Air has no meshes
+                    // Covereds are ignored for overdraw reasons
+                    noRectsVal |= math.select(0u, 1u, mat == 0 | covered);
+
+                    prevMat = mat;
+                    prevCovered = covered;
                 }
+
+                rectData[y] = new(changedVal & ~noRectsVal, noRectsVal);
             }
 
             for (int y = 0; y < max; y++) {
-                for (int x = 0; x < max; x++) {
+                while (rectData[y].rectStarts != 0) {
                     // If yet unhandled, grow as far as possible
                     // horizontally, and then vertically.
-                    if (Hint.Unlikely(!GetHandled(handled, x, y))) {
-                        var rect = GrowRect(handled, x, y, layer);
-                        CreateQuad(rect, layer);
-                    }
+                    var rect = GrowRect(rectData, y, layer);
+                    CreateQuad(rect, layer);
                 }
             }
         }
 
         [SkipLocalsInit]
-        unsafe void CreateQuad(RectMat rect, [AssumeRange(0,31)] int layer) {
+        unsafe void CreateQuad(RectMat rect, [AssumeRange(0, 31)] int layer) {
             int2* corners = stackalloc int2[4];
 
             int4 minmax = new(rect.x, rect.y, rect.x, rect.y);
@@ -182,8 +225,8 @@ namespace Atrufulgium.Voxel.Base {
                     rect.material
                 );
 
-                // Ignore everything that does not fit. It's extremely hard to
-                // achieve in natural gameplay to hit this.
+                // Ignore everything that does not fit with the !=s below. It's
+                // extremely hard to achieve in natural gameplay to hit this.
                 if (Hint.Likely(!vertToIndex.TryGetValue(vert, out var index))) {
                     index = vertToIndex.Count();
                     if (Hint.Likely(index != ChunkMesher.MAXVERTICES)) {
@@ -203,103 +246,102 @@ namespace Atrufulgium.Voxel.Base {
 
         /// <summary>
         /// Grows the rectangle greedily as much as it can, updating the
-        /// <paramref name="handled"/> bitfields as needed. Returns the
-        /// resulting rectangle.
+        /// <paramref name="rectStarts"/> and <paramref name="noRects"/>
+        /// bitfields as needed. Returns the resulting rectangle.
         /// </summary>
-        unsafe RectMat GrowRect(BitField32* handled,
-            [AssumeRange(0,31)] int x,
+        unsafe RectMat GrowRect(
+            RectData* rectData,
             [AssumeRange(0,31)] int y,
             [AssumeRange(0,31)] int layer
         ) {
-            int x2 = x;
-            int mat = GetChunk(x, y, layer);
-            for (; x2 < max; x2++) {
-                bool isHandled = GetHandled(handled, x2, y);
-                if (isHandled) {
-                    // Don't overlap rects or air/covereds
-                    break;
-                }
-
-                int mat2 = GetChunk(x2, y, layer);
-                if (mat != mat2) {
-                    break;
-                }
-            }
-            // Represents [x, x + width).
+            RectData yData = rectData[y];
+            int x = FirstBinaryOne(yData.rectStarts);
+            Hint.Assume(0 <= x && x < 32); // As otherwise the row is 0 and this is not called.
+            // Since a rectangle is starting here already, disallow it from
+            // further operations. It may become 0 now.
+            uint xmask = AllOnesUpTo(x + 1);
+            yData.rectStarts &= ~xmask;
+            // May be 32 (actually max)
+            int x2 = FirstBinaryOne(yData.rectStarts | (yData.noRects & ~xmask));
+            // Represents [x, x + width), exclusive.
             int width = x2 - x;
+            rectData[y] = yData;
 
             // Now that we know the width, see how far up we can go.
-            int y2 = y;
+            // Do this by masking the bits we care about. If this mask doesn't
+            // touch any changes or illegals, we _might_ be fine. We still
+            // need to check the material is the same.
+            // *Actually two masks, the first bit we care about may be a change.
+            uint rectMask = AllOnesUpTo(x2) & ~AllOnesUpTo(x);
+            uint smallRectMask = AllOnesUpTo(x2) & ~AllOnesUpTo(x + 1);
+            ushort mat = GetChunk(x, y, layer);
+
+            // While we're at it, mark the area as done.
+            // We can do this with the same mask as before!
+            // Also add rectangle starts to the side of the rectangle where
+            // applicable, because otherwise it won't generate anymore.
+            uint newRectMask = 0x8000_0000 >> x2;
+            newRectMask &= AllOnesUpTo(max);
+
+            int y2 = y + 1;
             for (; y2 < max; y2++) {
-                bool validRow = true;
-
-                // Unfortunate near-copypasta of the above
-                for (x2 = x; x2 < x + width; x2++) {
-                    bool isHandled = GetHandled(handled, x2, y2);
-                    if (isHandled) {
-                        validRow = false;
-                        break;
-                    }
-                    int mat2 = GetChunk(x2, y2, layer);
-                    if (mat != mat2) {
-                        validRow = false;
-                        break;
-                    }
-                }
-
-                if (!validRow) {
+                RectData y2Data = rectData[y2];
+                uint res = (rectMask & y2Data.noRects) | (smallRectMask & y2Data.rectStarts);
+                if (res != 0)
                     break;
-                }
-            }
-            int height = y2 - y;
 
-            // Mark the area as done
-            for (y2 = y; y2 < y + height; y2++) {
-                for (x2 = x; x2 < x + width; x2++)
-                    SetHandled(handled, x2, y2, true);
+                ushort mat2 = GetChunk(x, y2, layer);
+                if (mat != mat2)
+                    break;
+
+                // This row is valid, mark done.
+                y2Data.rectStarts &= ~rectMask;
+                y2Data.rectStarts |= newRectMask & ~y2Data.noRects;
+                y2Data.noRects |= rectMask;
+                rectData[y2] = y2Data;
             }
+
+            int height = y2 - y;
 
             return new(
                 (byte)x,
                 (byte)y,
                 (byte)width,
                 (byte)height,
-                (ushort)mat
+                mat
             );
         }
 
         /// <summary>
-        /// Whether rects can do anything they want to as they're covered
-        /// by something else.
+        /// <para>
+        /// Returns the zero-indexed bit-position of the first set bit.
+        /// The MSB is index 0, the LSB is index 31. Returns if 0.
+        /// </para>
+        /// <para>
+        /// This is clamped to [0,<see cref="max"/>], as we need that in every
+        /// relevant context.
+        /// </para>
         /// </summary>
-        bool IsCovered(
-            [AssumeRange(0,31)] int x,
-            [AssumeRange(0,31)] int y,
-            [AssumeRange(0,31)] int layer
-        ) {
-            if (Hint.Unlikely(layer == TopLayer))
-                return false;
-            return GetChunk(x, y, layer + scale) > 0;
-        }
+        [return: AssumeRange(0,32)]
+        int FirstBinaryOne(uint i)
+            => math.min(math.select(math.lzcnt(i), 32, i == 0), max);
 
-        unsafe bool GetHandled(
-            BitField32* handled,
-            [AssumeRange(0,31)] int x,
-            [AssumeRange(0,31)] int y
-        ) {
-            int unrolledIndex = y * max + x;
-            return handled[unrolledIndex / 32].IsSet(unrolledIndex % 32);
-        }
-
-        unsafe void SetHandled(
-            BitField32* handled,
-            [AssumeRange(0,31)] int x,
-            [AssumeRange(0,31)] int y,
-            bool value
-        ) {
-            int unrolledIndex = y * max + x;
-            handled[unrolledIndex / 32].SetBits(unrolledIndex % 32, value);
-        }
+        /// <summary>
+        /// <para>
+        /// Returns a uint that, counting from the LSB, is set to <tt>1</tt>
+        /// <paramref name="i"/> times, and then set to <tt>0</tt>
+        /// 32-<paramref name="i"/> times.
+        /// </para>
+        /// <para>
+        /// Valid inputs are 0..32.
+        /// </para>
+        /// </summary>
+        /// <remarks>
+        /// This is <i>excluding</i> index <paramref name="i"/> itself.
+        /// As such, <code>FirstBinaryOne(AllOnesUpTo(i+1)) = i</code>.
+        /// </remarks>
+        uint AllOnesUpTo([AssumeRange(0,32)] int i)
+            => math.select(uint.MaxValue - (uint.MaxValue >> i), uint.MaxValue, i == 32);
 
         /// <summary>
         /// Whether the X-, Y-, or Z-direction is constant, and which side we
@@ -342,6 +384,20 @@ namespace Atrufulgium.Voxel.Base {
         ) => chunk[LayerToCoord(x * scale, y * scale, layer)];
 
         /// <summary>
+        /// Whether rects can do anything they want to as they're covered
+        /// by something else.
+        /// </summary>
+        bool IsCovered(
+            [AssumeRange(0,31)] int x,
+            [AssumeRange(0,31)] int y,
+            [AssumeRange(0,31)] int layer
+        ) {
+            if (Hint.Unlikely(layer == TopLayer))
+                return false;
+            return GetChunk(x, y, layer + scale) > 0;
+        }
+
+        /// <summary>
         /// <para>
         /// Contains the properties of a rect inside a layer in a chunk,
         /// together with its material. Equality ignores the material.
@@ -351,9 +407,6 @@ namespace Atrufulgium.Voxel.Base {
         /// is made of <tt>material</tt>.
         /// </para>
         /// </summary>
-        /// <remarks>
-        /// Assumes <see cref="Chunk.ChunkSize"/> is at most 256.
-        /// </remarks>
         readonly struct RectMat : IEquatable<RectMat> {
             public byte x { get => _BurstXValue(); }
             public byte y { get => _BurstYValue(); }
