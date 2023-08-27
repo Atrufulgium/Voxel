@@ -62,6 +62,8 @@ namespace Atrufulgium.Voxel.Base {
             this.LoD = LoD;
             int size = ChunkSize >> LoD;
             voxels = new(size*size*size, Allocator.Persistent);
+            if (VoxelsPerAxis < 4)
+                throw new ArgumentException($"LoD may not be such that there are less than 4 voxels per axis.", nameof(LoD));
         }
 
         /// <summary>
@@ -177,6 +179,15 @@ namespace Atrufulgium.Voxel.Base {
                 yield return (coord, this[coord]);
             }
         }
+
+        /// <summary>
+        /// Unsafe read access into the array. This allows bursted jobs to not
+        /// recalculate <see cref="VoxelsPerAxis"/> and <see cref="VoxelSize"/>
+        /// every time.
+        /// </summary>
+        public ushort GetRaw(int index) => voxels[index];
+        /// <inheritdoc cref="GetRaw(int)"/>
+        public uint4 GetRaw(int4 index) => new(voxels[index.x], voxels[index.y], voxels[index.z], voxels[index.w]);
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 

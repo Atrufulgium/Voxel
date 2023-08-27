@@ -107,13 +107,16 @@ namespace Atrufulgium.Voxel.Base {
         int _BurstTopPlayerValue() => _burstTopLayerValue;
         int _burstTopLayerValue;
 
+        int LoD;
+
 
         public void Execute() {
             _burstScaleValue = chunk.VoxelSize;
             _burstMaxValue = chunk.VoxelsPerAxis;
             _burstTopLayerValue = 32 - scale;
             quadCount = 0;
-
+            LoD = chunk.LoD;
+            
             for (int i = 0; i < renderDirections.Length; i++) {
                 currentLayerMode = renderDirections[i];
                 // TODO: the viewdir part.
@@ -159,25 +162,39 @@ namespace Atrufulgium.Voxel.Base {
                 //     ____ __1_ ___1 ___1 __11 11_1 ____ 1___
                 uint changedVal = 0;
 
-                ushort prevMat = ushort.MaxValue;
+                uint prevMat = ushort.MaxValue;
                 bool prevCovered = false;
-                for (int x = 0; x < max; x++) {
-                    changedVal <<= 1;
-                    noRectsVal <<= 1;
-                    ushort mat = GetChunk(x, y, layer);
-                    bool covered = IsCovered(x, y, layer);
+                for (int x = 0; x < max; x += 4) {
+                    changedVal <<= 4;
+                    noRectsVal <<= 4;
+                    int4 xvec = x + new int4(0,1,2,3);
+                    uint4 mats = GetChunk(xvec, y, layer);
+                    bool4 covereds = IsCovered(xvec, y, layer);
+
+                    uint4 prevMats = mats.wxyz;
+                    prevMats.x = prevMat;
+                    bool4 prevCovereds = covereds.wxyz;
+                    prevCovereds.x = prevCovered;
 
                     // Count going covered <-> uncovered as change that
                     // requires a new rect to start.
-                    changedVal |= math.select(0u, 1u, mat != prevMat | covered != prevCovered);
+                    bool4 changed = mats != prevMats;
+                    changed |= covereds != prevCovereds;
+                    changedVal += math.dot((uint4)changed, new uint4(8,4,2,1));
 
                     // Air has no meshes
                     // Covereds are ignored for overdraw reasons
-                    noRectsVal |= math.select(0u, 1u, mat == 0 | covered);
+                    bool4 noRect = mats == 0;
+                    noRect |= covereds;
+                    noRectsVal += math.dot((uint4)noRect, new uint4(8,4,2,1));
 
-                    prevMat = mat;
-                    prevCovered = covered;
+                    prevMat = mats.w;
+                    prevCovered = covereds.w;
                 }
+
+                // We care about MSB, but if max < 32 it's not shifted enough
+                changedVal <<= (32 - max);
+                noRectsVal <<= (32 - max);
 
                 rectData[y] = new(changedVal & ~noRectsVal, noRectsVal);
             }
@@ -351,9 +368,9 @@ namespace Atrufulgium.Voxel.Base {
             XUp = 0,
             YUp = 1,
             ZUp = 2,
-            XDown = 3,
-            YDown = 4,
-            ZDown = 5
+            XDown = 4,
+            YDown = 5,
+            ZDown = 6
         };
 
         int3 LayerToCoord(
@@ -361,27 +378,55 @@ namespace Atrufulgium.Voxel.Base {
             [AssumeRange(0,32)] int y,
             [AssumeRange(0,31)] int layer
         ) {
-            Hint.Assume(currentLayerMode >= LayerMode.XUp && currentLayerMode <= LayerMode.ZDown);
             // Layer is unnormalized to [0,max) and instead has gaps.
             // So do not involve max in this calculation as we live in [0,32).
             // Do note the "scale" to keep on the grid.
             if (currentLayerMode >= LayerMode.XDown) {
                 layer = TopLayer - layer;
             }
-            int3 ret = new(x, y, layer);
-            var mod = (int)currentLayerMode % 3;
+            var mod = (int)currentLayerMode % 4;
             if (mod == 1)
-                ret = ret.yzx;
+                return new(y, layer, x);
             if (mod == 2)
-                ret = ret.zxy;
-            return ret;
+                return new(layer, x, y);
+            return new(x, y, layer);
+        }
+
+        int4x3 LayerToCoord(
+            int4 x,
+            int4 y,
+            [AssumeRange(0,31)] int layer
+        ) {
+            if (currentLayerMode >= LayerMode.XDown) {
+                layer = TopLayer - layer;
+            }
+            var mod = (int)currentLayerMode % 4;
+            if (mod == 1)
+                return new(y, layer, x);
+            if (mod == 2)
+                return new(layer, x, y);
+            return new(x, y, layer);
         }
 
         ushort GetChunk(
             [AssumeRange(0,31)] int x,
             [AssumeRange(0,31)] int y,
             [AssumeRange(0,31)] int layer
-        ) => chunk[LayerToCoord(x * scale, y * scale, layer)];
+        ) {
+            int3 coord = LayerToCoord(x * scale, y * scale, layer);
+            coord >>= LoD;
+            return chunk.GetRaw(coord.x + max * (coord.y + max * coord.z));
+        }
+
+        uint4 GetChunk(
+            int4 x,
+            int4 y,
+            [AssumeRange(0,31)] int layer
+        ) {
+            int4x3 coord = LayerToCoord(x * scale, y * scale, layer);
+            coord >>= LoD;
+            return chunk.GetRaw(coord.c0 + max * (coord.c1 + max * coord.c2));
+        }
 
         /// <summary>
         /// Whether rects can do anything they want to as they're covered
@@ -390,6 +435,16 @@ namespace Atrufulgium.Voxel.Base {
         bool IsCovered(
             [AssumeRange(0,31)] int x,
             [AssumeRange(0,31)] int y,
+            [AssumeRange(0,31)] int layer
+        ) {
+            if (Hint.Unlikely(layer == TopLayer))
+                return false;
+            return GetChunk(x, y, layer + scale) > 0;
+        }
+
+        bool4 IsCovered(
+            int4 x,
+            int4 y,
             [AssumeRange(0,31)] int layer
         ) {
             if (Hint.Unlikely(layer == TopLayer))
