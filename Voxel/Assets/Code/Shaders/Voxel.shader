@@ -2,6 +2,8 @@ Shader "Custom/Voxel"
 {
     Properties
     {
+        [Toggle(PIXEL_SHADOWS)] _EnablePixelShadows("Enable Pixelated Shadows", Float) = 1
+
         [HideInInspector] _MainTex ("Texture", 2D) = "white" {}
 
         // Things we need because we're relying on the Standard Shader.
@@ -27,6 +29,7 @@ Shader "Custom/Voxel"
             #pragma shader_feature_local _SPECULARHIGHLIGHTS_OFF
             #pragma shader_feature_local _GLOSSYREFLECTIONS_OFF
             #pragma multi_compile_fwdbase
+            #pragma multi_compile __ PIXEL_SHADOWS
 
             #include "VoxelContent.cginc"
             ENDCG
@@ -46,6 +49,7 @@ Shader "Custom/Voxel"
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _SPECULARHIGHLIGHTS_OFF
             #pragma multi_compile_fwdadd_fullshadows
+            #pragma multi_compile __ PIXEL_SHADOWS
 
             #include "VoxelContent.cginc"
             ENDCG

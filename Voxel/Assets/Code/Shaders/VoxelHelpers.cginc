@@ -1,4 +1,4 @@
-// See also the Chunk.Vertex struct over in c#-land's Chunk.cs.
+// See also the Chunk.Vertex struct over in c#-land.
 struct appdata {
     // Contained in the factors, you get:
     //   #1: factor 33: x-position 0, .., 32
@@ -20,13 +20,13 @@ struct TessFactors {
 TessFactors GetTessFactors(InputPatch<appdata, 4> patch) {
     // As mentioned earlier we're not actually tesselating.
     // We're only doing this to gain access to the entire triangle.
-	TessFactors f;
+    TessFactors f;
     [unroll]
     for (int i = 0; i < 4; i++)
         f.edge[i] = 1;
-	f.inside[0] = 0;
+    f.inside[0] = 0;
     f.inside[1] = 0;
-	return f;
+    return f;
 }
 
 [UNITY_domain("quad")]
@@ -59,13 +59,13 @@ void computeVertNormTanUVMaterial(
     in OutputPatch<appdata, 4> patch,
     in float2 tessUV,
     
-    out float4 pos,
+    out float4 pos, // model pos
     out float3 normal,
     out float3 tangent,
     out float2 uv,
     out uint material
 ) {
-    float4 posses[4];
+    int4 posses[4];
     uint _;
     unpack(patch[0], posses[0], material);
     unpack(patch[1], posses[1], _);
@@ -79,8 +79,8 @@ void computeVertNormTanUVMaterial(
     int index = (int)dot(coordUV, float2(1,2));
     pos = posses[index];
     
-    float3 dx1 = posses[1].xyz - posses[0].xyz;
-    float3 dx2 = posses[3].xyz - posses[0].xyz;
+    int3 dx1 = posses[1].xyz - posses[0].xyz;
+    int3 dx2 = posses[3].xyz - posses[0].xyz;
     normal = cross(dx1, dx2);
     // Now the normal is correct up to sign. The correct sign is the one such
     // that the normal points to the halfspace containing the camera.
@@ -93,16 +93,26 @@ void computeVertNormTanUVMaterial(
     
     // Texture UVs can also be calculated, though not yet frac'd.
     float3 dxdiag = posses[2].xyz - posses[0].xyz;
+    // Scale the uvs so that 2 voxels = 1 texture width
+    // Don't forget to offset!
+    dxdiag *= 0.5;
+    // 0.5 if odd, 0 if even
+    float3 uvoffset3 = frac(posses[0] * 0.5);
     float2 uvmax;
-    if (normal.x != 0)
+    float2 uvoffset;
+    if (normal.x != 0) {
         uvmax = dxdiag.zy;
-    else if (normal.y != 0)
+        uvoffset = uvoffset3.zy;
+    } else if (normal.y != 0) {
         uvmax = dxdiag.xz;
-    else if (normal.z != 0)
+        uvoffset = uvoffset3.xz;
+    } else if (normal.z != 0) {
         uvmax = dxdiag.yx;
-    else
+        uvoffset = uvoffset3.yx;
+    } else {
         uvmax = 0;
-    uv = tessUV * uvmax;
+    }
+    uv = tessUV * uvmax + uvoffset;
 }
 
 #define FACE float
