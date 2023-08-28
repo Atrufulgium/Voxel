@@ -2,7 +2,7 @@
 using Unity.Mathematics;
 using UnityEngine.Rendering;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.WorldRendering {
 
     /// <summary>
     /// Turns a (x,y,z,material) into a single uint, by storing in the

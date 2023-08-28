@@ -3,19 +3,18 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.WorldRendering {
     /// <summary>
     /// Stores a collection of chunks.
     /// </summary>
-    // TODO: Consider LoD in this class.
-    public class World : IDisposable {
+    public class RenderWorld : IDisposable {
 
-        static readonly Dictionary<int, World> knownWorlds = new();
+        static readonly Dictionary<int, RenderWorld> knownWorlds = new();
 
         /// <summary>
         /// Creates a new world with a unique id.
         /// </summary>
-        public World(int id) {
+        public RenderWorld(int id) {
             if (knownWorlds.ContainsKey(id))
                 throw new ArgumentException($"A world with id {id} already exists.", nameof(id));
 
@@ -84,7 +83,7 @@ namespace Atrufulgium.Voxel.Base {
         /// Sets an existing chunk's LoD. Does nothing for nonexistent chunks.
         /// </summary>
         public void SetChunkLoD(ChunkKey key, int LoD) {
-            if (allChunks.TryGetValue(key, out Chunk chunk)) {
+            if (allChunks.TryGetValue(key, out Chunk chunk) && chunk.LoD != LoD) {
                 chunk = chunk.WithLoD(LoD);
                 allChunks[key] = chunk;
                 dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
@@ -92,7 +91,13 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         /// <summary>
+        /// <para>
         /// Attempts to get the voxel value of a position in the world.
+        /// </para>
+        /// <para>
+        /// If the chunk does not exist, it returns <tt>false</tt> and outputs
+        /// air. Depending on your application, this may be fine.
+        /// </para>
         /// </summary>
         public bool TryGet(int3 position, out ushort material) {
             ChunkKey key = ChunkKey.FromWorldPos(position, out int3 chunkPos);
@@ -132,14 +137,14 @@ namespace Atrufulgium.Voxel.Base {
         /// <summary>
         /// If the given world exists, returns it.
         /// </summary>
-        public static bool TryGetWorld(int id, out World world)
+        public static bool TryGetWorld(int id, out RenderWorld world)
             => knownWorlds.TryGetValue(id, out world);
 
         /// <summary>
         /// Removes an existing world.
         /// </summary>
         public static void RemoveWorld(int id) {
-            if (!TryGetWorld(id, out World world))
+            if (!TryGetWorld(id, out RenderWorld world))
                 throw new ArgumentException($"World id {id} does not exist and cannot be removed.");
 
             knownWorlds.Remove(id);

@@ -4,10 +4,10 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.WorldRendering {
 
     /// <summary>
-    /// An indexer for chunks in the <see cref="World"/>.
+    /// An indexer for chunks in the <see cref="RenderWorld"/>.
     /// Construct it via either of <see cref="FromWorldPos(int3)"/> or
     /// <see cref="FromKey(int3)"/>.
     /// </summary>

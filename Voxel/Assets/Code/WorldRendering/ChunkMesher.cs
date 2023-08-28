@@ -7,7 +7,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.WorldRendering {
 
     /// <summary>
     /// Provides both instance methods for one mesh job at a time, as well as

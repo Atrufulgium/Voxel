@@ -5,7 +5,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.WorldRendering {
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE1006:Naming Styles", Justification = "Burst!")]
     [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]

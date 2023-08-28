@@ -2,10 +2,10 @@
 using UnityEngine;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.Base {
-    public class WorldBehaviour : MonoBehaviour {
+namespace Atrufulgium.Voxel.WorldRendering {
+    public class RenderWorldBehaviour : MonoBehaviour {
 
-        World world;
+        RenderWorld world;
         ChunkMesher mesher;
         new Transform transform;
 
@@ -19,10 +19,10 @@ namespace Atrufulgium.Voxel.Base {
             if (voxelMat == null)
                 voxelMat = Resources.Load<Material>("Materials/Voxel");
 
-            if (World.WorldExists(0)) {
-                World.RemoveWorld(0);
+            if (RenderWorld.WorldExists(0)) {
+                RenderWorld.RemoveWorld(0);
             }
-            world = new World(0);
+            world = new RenderWorld(0);
             mesher = new();
             transform = GetComponent<Transform>();
 
@@ -46,7 +46,7 @@ namespace Atrufulgium.Voxel.Base {
             center.y /= 20;
             ushort mat = 3;
             for (int i = 0; i < 200; i++) {
-                //world.Set(center + rng.NextInt3(-4, 4), mat);
+                world.Set(center + rng.NextInt3(-4, 4), mat);
             }
 
             for (int i = 0; i < 1000; i++) {
@@ -94,6 +94,15 @@ namespace Atrufulgium.Voxel.Base {
         }
 
         private void Generate() {
+            //for (int z = 0; z < 32; z++) {
+            //    for (int y = 0; y < 32; y++) {
+            //        for (int x = 0; x < 32; x++)
+            //            if (math.length(new int3(x, y, z) - 16) < 16)
+            //                world.Set(new(x, y, z), 4, 2);
+            //    }
+            //}
+            //return;
+
             int radius = 300;
             for (int x = -radius; x < radius; x++) {
                 int bound = (int)math.sqrt(radius*radius - x * x);
@@ -108,8 +117,10 @@ namespace Atrufulgium.Voxel.Base {
                         + Mathf.Abs(z/10);
                     int LoD = Mathf.Clamp(Mathf.FloorToInt(new Vector2(x, z).magnitude / 100f), 0, 5);
                     for (int y = -15; y < height - 10; y++)
-                        world.Set(new(x, y, z), 2, 0);
+                        world.Set(new(x, y, z), 2, LoD);
                     world.Set(new(x, (int)height - 10, z), 1, LoD);
+                    if ((int)height % 2 == 1)
+                        world.Set(new(x, (int)height - 11, z), 1, LoD);
                 }
             }
         }

@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.Base {
+namespace Atrufulgium.Voxel.WorldRendering {
 
     /// <summary>
     /// Represents a 32x32x32 cube of voxels.
