@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Burst.CompilerServices;
 using Unity.Collections;
@@ -30,11 +31,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// <summary>
         /// All verts in the current GetMesh call.
         /// </summary>
-        /// <remarks>
-        /// Vertex count can be read from <see cref="vertToIndex"/>'s Count().
-        /// </remarks>
         [WriteOnly]
         internal NativeArray<Vertex> vertices;
+        [WriteOnly]
+        internal NativeReference<int> verticesLength;
         int vertCount;
 
         /// <summary>
@@ -73,30 +73,24 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// This is needed to weld together vertices of the same material.
         /// </para>
         /// </summary>
-        // Can't whip up a datastructure that beats this comfortably in an
-        // afternoon. Let's leave it at this, how disappointing that may be.
-        // Also: just ditching this and having every vertex unique works fine
-        // (approximately 7% quicker), but then the 28x28x28 case is achieved
-        // _much_ quicker. (And there's 160% more verts, but my verts are tiny.)
-        internal NativeParallelHashMap<Vertex, int> vertToIndex;
+        // This is an implicit hash table. See the two VertToIndex.. methods.
+        internal NativeArray<VertToIndexEntry> vertToIndex;
 
         static readonly LayerMode[] renderDirections = new[] {
             LayerMode.XUp, LayerMode.YUp, LayerMode.ZUp,
             LayerMode.XDown, LayerMode.YDown, LayerMode.ZDown
         };
 
-        LayerMode currentLayerMode;
-
         // burst
         // like
         // pls
         int scale => _BurstScaleValue();
-        [return:AssumeRange(1,32)]
+        [return: AssumeRange(1, 8)]
         int _BurstScaleValue() => _burstScaleValue;
         int _burstScaleValue;
 
         int max => _BurstMaxValue();
-        [return:AssumeRange(1,32)]
+        [return: AssumeRange(4, 32)]
         int _BurstMaxValue() => _burstMaxValue;
         int _burstMaxValue;
 
@@ -104,7 +98,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// The highest layer in the current pass.
         /// </summary>
         int TopLayer => _BurstTopPlayerValue();
-        [return:AssumeRange(0,31)]
+        [return: AssumeRange(24, 31)]
         int _BurstTopPlayerValue() => _burstTopLayerValue;
         int _burstTopLayerValue;
 
@@ -118,14 +112,20 @@ namespace Atrufulgium.Voxel.WorldRendering {
             vertCount = 0;
             quadCount = 0;
             LoD = chunk.LoD;
-            
-            for (int i = 0; i < renderDirections.Length; i++) {
-                currentLayerMode = renderDirections[i];
-                // TODO: the viewdir part.
-                for (int layer = 0; layer < Chunk.ChunkSize; layer += scale) {
-                    HandleLayer(layer);
-                }
+
+            // TODO: the viewdir part.
+            for (int layer = 0; layer < Chunk.ChunkSize; layer += scale) {
+                // Unfortunately need to pass currentLayerMode through all
+                // calls. Otherwise Burst doesn't see the "oh i can do this
+                // compile-time" trick.
+                HandleLayer(layer, LayerMode.XUp);
+                HandleLayer(layer, LayerMode.XDown);
+                HandleLayer(layer, LayerMode.YUp);
+                HandleLayer(layer, LayerMode.YDown);
+                HandleLayer(layer, LayerMode.ZUp);
+                HandleLayer(layer, LayerMode.ZDown);
             }
+            verticesLength.Value = vertCount;
             quadsLength.Value = quadCount;
         }
 
@@ -139,8 +139,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
             }
         }
 
-        [SkipLocalsInit] // Tells Burst to not zero-set stackallocs
-        unsafe void HandleLayer([AssumeRange(0,31)] int layer) {
+        // Tells Burst to not zero-set stackallocs
+        [SkipLocalsInit]
+        // Required to make Burst compile-time ALL LayerToCoord calls.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        unsafe void HandleLayer([AssumeRange(0, 31)] int layer, LayerMode currentLayerMode) {
             // Assuming 32 ChunkSize.
             // This is 256B of stack space at most.
             // "rectStarts" is set to 1 whenever a rectangle should start.
@@ -168,9 +171,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 for (int x = 0; x < max; x += 4) {
                     bits <<= 4;
 
-                    int4 xvec = x + new int4(0,1,2,3);
-                    uint4 mats = GetChunk(xvec, y, layer);
-                    bool4 covereds = IsCovered(xvec, y, layer);
+                    int4 xvec = x + new int4(0, 1, 2, 3);
+                    uint4 mats = GetChunk(xvec, y, layer, currentLayerMode);
+                    bool4 covereds = IsCovered(xvec, y, layer, currentLayerMode);
                     uint4 prevMats = mats.wxyz;
                     prevMats.x = prevMat;
                     prevMat = mats.w;
@@ -187,7 +190,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                     uint3x4 updates = math.transpose(updatesTransposed);
                     bits += 8 * updates.c0 + 4 * updates.c1 + 2 * updates.c2 + updates.c3;
                 }
-                
+
                 uint changedCovered = covered ^ (covered >> 1);
                 uint noRectsVal = airMat | covered;
                 uint changedVal = changedMat | changedCovered;
@@ -204,17 +207,17 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 while (rectData[y].rectStarts != 0) {
                     // If yet unhandled, grow as far as possible
                     // horizontally, and then vertically.
-                    var rect = GrowRect(rectData, y, layer);
-                    CreateQuad(rect, layer);
+                    var rect = GrowRect(rectData, y, layer, currentLayerMode);
+                    CreateQuad(rect, layer, currentLayerMode);
                 }
             }
         }
 
         [SkipLocalsInit]
-        unsafe void CreateQuad(RectMat rect, [AssumeRange(0, 31)] int layer) {
+        unsafe void CreateQuad(RectMat rect, [AssumeRange(0, 31)] int layer, LayerMode currentLayerMode) {
             int2* corners = stackalloc int2[4];
 
-            int4 minmax = new(rect.x, rect.y, rect.x, rect.y);
+            int4 minmax = new int4(rect.x, rect.y, rect.x, rect.y) * scale;
             minmax.zw += new int2(rect.width, rect.height);
             // The order matters depending on which side of course.
             corners[0] = minmax.zy; //new(rect.x + rect.width, rect.y);
@@ -234,30 +237,39 @@ namespace Atrufulgium.Voxel.WorldRendering {
             }
 
             // Register verts if they don't exist, and add to the quads list.
+            int4 quadIndices = default;
+            int3* coords = stackalloc int3[4];
             for (int i = 0; i < 4; i++) {
                 int2 corner = corners[i];
+                coords[i] = LayerToCoord(corner.x, corner.y, layer, currentLayerMode);
+            }
+
+            for (int i = 0; i < 4; i++) {
                 Vertex vert;
 
                 vert = new(
-                    LayerToCoord(corner.x * scale, corner.y * scale, layer),
+                    coords[i],
                     rect.material
                 );
 
                 // Ignore everything that does not fit with the !=s below. It's
                 // extremely hard to achieve in natural gameplay to hit this.
-                if (Hint.Likely(!vertToIndex.TryGetValue(vert, out var index))) {
+                if (Hint.Likely(!VertToIndexTryGetValue(vert, out var index))) {
                     index = vertCount;
                     if (Hint.Likely(index != ChunkMesher.MAXVERTICES)) {
                         vertices[index] = vert;
-                        vertToIndex.Add(vert, (ushort)index);
+                        VertToIndexAdd(vert, (ushort)index);
                         vertCount++;
                     } else {
                         index = 0;
                     }
                 }
+                quadIndices[i] = index;
+            }
 
+            for (int i = 0; i < 4; i++) {
                 if (Hint.Likely(quadCount != ChunkMesher.MAXQUADS)) {
-                    quads[quadCount] = (ushort)index;
+                    quads[quadCount] = (ushort)quadIndices[i];
                     quadCount++;
                 }
             }
@@ -270,8 +282,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// </summary>
         unsafe RectMat GrowRect(
             RectData* rectData,
-            [AssumeRange(0,31)] int y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 31)] int y,
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
             RectData yData = rectData[y];
             int x = FirstBinaryOne(yData.rectStarts);
@@ -293,7 +306,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             // *Actually two masks, the first bit we care about may be a change.
             uint rectMask = AllOnesUpTo(x2) & ~AllOnesUpTo(x);
             uint smallRectMask = AllOnesUpTo(x2) & ~AllOnesUpTo(x + 1);
-            ushort mat = GetChunk(x, y, layer);
+            ushort mat = GetChunk(x, y, layer, currentLayerMode);
 
             // While we're at it, mark the area as done.
             // We can do this with the same mask as before!
@@ -309,7 +322,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 if (res != 0)
                     break;
 
-                ushort mat2 = GetChunk(x, y2, layer);
+                ushort mat2 = GetChunk(x, y2, layer, currentLayerMode);
                 if (mat != mat2)
                     break;
 
@@ -341,7 +354,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// relevant context.
         /// </para>
         /// </summary>
-        [return: AssumeRange(0,32)]
+        [return: AssumeRange(0, 32)]
         int FirstBinaryOne(uint i)
             => math.min(math.select(math.lzcnt(i), 32, i == 0), max);
 
@@ -359,14 +372,14 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// This is <i>excluding</i> index <paramref name="i"/> itself.
         /// As such, <code>FirstBinaryOne(AllOnesUpTo(i+1)) = i</code>.
         /// </remarks>
-        uint AllOnesUpTo([AssumeRange(0,32)] int i)
+        uint AllOnesUpTo([AssumeRange(0, 32)] int i)
             => math.select(uint.MaxValue - (uint.MaxValue >> i), uint.MaxValue, i == 32);
 
         /// <summary>
         /// Whether the X-, Y-, or Z-direction is constant, and which side we
         /// are considering.
         /// </summary>
-        enum LayerMode { 
+        enum LayerMode {
             XUp = 0,
             YUp = 1,
             ZUp = 2,
@@ -376,9 +389,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
         };
 
         int3 LayerToCoord(
-            [AssumeRange(0,32)] int x,
-            [AssumeRange(0,32)] int y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 32)] int x,
+            [AssumeRange(0, 32)] int y,
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
             // Layer is unnormalized to [0,max) and instead has gaps.
             // So do not involve max in this calculation as we live in [0,32).
@@ -397,7 +411,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
         int4x3 LayerToCoord(
             int4 x,
             int4 y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
             if (currentLayerMode >= LayerMode.XDown) {
                 layer = TopLayer - layer;
@@ -411,11 +426,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         ushort GetChunk(
-            [AssumeRange(0,31)] int x,
-            [AssumeRange(0,31)] int y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 31)] int x,
+            [AssumeRange(0, 31)] int y,
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
-            int3 coord = LayerToCoord(x * scale, y * scale, layer);
+            int3 coord = LayerToCoord(x * scale, y * scale, layer, currentLayerMode);
             coord >>= LoD;
             return chunk.GetRaw(coord.x + max * (coord.y + max * coord.z));
         }
@@ -423,9 +439,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
         uint4 GetChunk(
             int4 x,
             int4 y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
-            int4x3 coord = LayerToCoord(x * scale, y * scale, layer);
+            int4x3 coord = LayerToCoord(x * scale, y * scale, layer, currentLayerMode);
             coord >>= LoD;
             return chunk.GetRaw(coord.c0 + max * (coord.c1 + max * coord.c2));
         }
@@ -435,23 +452,25 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// by something else.
         /// </summary>
         bool IsCovered(
-            [AssumeRange(0,31)] int x,
-            [AssumeRange(0,31)] int y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 31)] int x,
+            [AssumeRange(0, 31)] int y,
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
             if (Hint.Unlikely(layer == TopLayer))
                 return false;
-            return GetChunk(x, y, layer + scale) > 0;
+            return GetChunk(x, y, layer + scale, currentLayerMode) > 0;
         }
 
         bool4 IsCovered(
             int4 x,
             int4 y,
-            [AssumeRange(0,31)] int layer
+            [AssumeRange(0, 31)] int layer,
+            LayerMode currentLayerMode
         ) {
             if (Hint.Unlikely(layer == TopLayer))
                 return false;
-            return GetChunk(x, y, layer + scale) > 0;
+            return GetChunk(x, y, layer + scale, currentLayerMode) > 0;
         }
 
         /// <summary>
@@ -472,13 +491,13 @@ namespace Atrufulgium.Voxel.WorldRendering {
             public readonly ushort material;
 
             // burst pls part II electric boogaloo
-            [return: AssumeRange(0ul,31ul)]
+            [return: AssumeRange(0ul, 31ul)]
             byte _BurstXValue() => _burstXValue;
-            [return: AssumeRange(0ul,31ul)]
+            [return: AssumeRange(0ul, 31ul)]
             byte _BurstYValue() => _burstYValue;
-            [return: AssumeRange(0ul,32ul)]
+            [return: AssumeRange(0ul, 32ul)]
             byte _BurstWidthValue() => _burstWidthValue;
-            [return: AssumeRange(0ul,32ul)]
+            [return: AssumeRange(0ul, 32ul)]
             byte _BurstHeightValue() => _burstHeightValue;
             readonly byte _burstXValue;
             readonly byte _burstYValue;
@@ -498,6 +517,62 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 && y == other.y
                 && width == other.width
                 && height == other.height;
+        }
+
+        // Note that at most four solid blocks can touch one vertex and still
+        // contribute to the vertices list. This * 4 < array langth = 128k.
+        const int BUCKET_SIZE = 32771;
+        const int TABLE_MASK = ChunkMesher.TABLECAPACITY - 1;
+
+        /// <summary>
+        /// This does NOT check duplicates.
+        /// </summary>
+        void VertToIndexAdd(Vertex v, ushort index) {
+            int tableIndex = (int)((uint)v.GetHashCode() % BUCKET_SIZE);
+            // Except for exceptional cases, very quickly done.
+            while (vertToIndex[tableIndex].IsInitialised()) {
+                tableIndex = (tableIndex + BUCKET_SIZE) & TABLE_MASK;
+            }
+            vertToIndex[tableIndex] = new VertToIndexEntry(v, index);
+        }
+
+        bool VertToIndexTryGetValue(Vertex v, out int index) {
+            int tableIndex = (int)((uint)v.GetHashCode() % BUCKET_SIZE);
+            index = 0;
+            while (true) {
+                VertToIndexEntry entry = vertToIndex[tableIndex];
+                if (Hint.Likely(!entry.IsInitialised()))
+                    return false;
+                if (Hint.Unlikely(entry.TryVertexMatches(v, out var uindex))) {
+                    index = uindex;
+                    return true;
+                }
+                tableIndex = (tableIndex + BUCKET_SIZE) & TABLE_MASK;
+            }
+        }
+
+        internal readonly struct VertToIndexEntry {
+            readonly Vertex vert;
+            readonly ushort index;
+            readonly bool initialised;
+            public VertToIndexEntry(Vertex vert, ushort index) {
+                this.vert = vert;
+                this.index = index;
+                initialised = true;
+            }
+
+            public bool TryVertexMatches(Vertex other, out ushort index) {
+                index = 0;
+                if (other == vert) {
+                    index = this.index;
+                    return true;
+                }
+                return false;
+            }
+
+            public bool IsInitialised() => initialised;
+
+            public override int GetHashCode() => vert.GetHashCode();
         }
     }
 }

@@ -22,10 +22,15 @@ namespace Atrufulgium.Voxel.WorldRendering {
         // So in effect, it's at most 28^3 * 0.5 * 6
         public const int MAXQUADS = 65856;
 
+        // We're already ruining the cache anyway. Factor *2 to keep occupancy
+        // below 50% to keep insertion clean.
+        public const int TABLECAPACITY = MAXVERTICES * 2;
+
         NativeArray<Vertex> vertices = new(MAXVERTICES, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+        NativeReference<int> verticesLength = new(Allocator.Persistent);
         NativeArray<ushort> quads = new(MAXQUADS, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         NativeReference<int> quadsLength = new(Allocator.Persistent);
-        NativeParallelHashMap<Vertex, int> vertToIndex = new(MAXVERTICES, Allocator.Persistent);
+        NativeArray<GreedyChunkMesherJob.VertToIndexEntry> vertToIndex = new(TABLECAPACITY, Allocator.Persistent);
 
         /// <summary>
         /// <para>
@@ -77,11 +82,15 @@ namespace Atrufulgium.Voxel.WorldRendering {
             if (async)
                 throw new InvalidOperationException("Cannot use the same ChunkMesher instance for multiple meshing tasks. Use multiple instances. Try using the static ChunkMesher.GetMeshAsynchronously.");
 
-            vertToIndex.Clear();
+            // Unfortunately we actually need to clear the table, psh
+            for (int i = 0; i < vertToIndex.Length; i++)
+                vertToIndex[i] = default;
+
             meshJob = new GreedyChunkMesherJob {
                 chunk = chunk.GetCopy(),
                 viewDir = viewDir,
                 vertices = vertices,
+                verticesLength = verticesLength,
                 quads = quads,
                 quadsLength = quadsLength,
                 vertToIndex = vertToIndex
@@ -118,7 +127,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 mesh = oldMesh;
             }
 
-            int vertCount = meshJob.vertToIndex.Count();
+            int vertCount = meshJob.verticesLength.Value;
             int quadCount = meshJob.quadsLength.Value;
 
             mesh.SetVertexBufferParams(vertCount, Vertex.Layout);
@@ -146,6 +155,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         public void Dispose() {
             vertices.Dispose();
+            verticesLength.Dispose();
             quads.Dispose();
             quadsLength.Dispose();
             vertToIndex.Dispose();
