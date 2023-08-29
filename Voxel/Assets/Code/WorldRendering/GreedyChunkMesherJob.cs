@@ -35,6 +35,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// </remarks>
         [WriteOnly]
         internal NativeArray<Vertex> vertices;
+        int vertCount;
 
         /// <summary>
         /// I'd call it "tris" if my topology wasn't quads. The indices of the
@@ -114,6 +115,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             _burstScaleValue = chunk.VoxelSize;
             _burstMaxValue = chunk.VoxelsPerAxis;
             _burstTopLayerValue = 32 - scale;
+            vertCount = 0;
             quadCount = 0;
             LoD = chunk.LoD;
             
@@ -245,10 +247,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 // Ignore everything that does not fit with the !=s below. It's
                 // extremely hard to achieve in natural gameplay to hit this.
                 if (Hint.Likely(!vertToIndex.TryGetValue(vert, out var index))) {
-                    index = vertToIndex.Count();
+                    index = vertCount;
                     if (Hint.Likely(index != ChunkMesher.MAXVERTICES)) {
                         vertices[index] = vert;
                         vertToIndex.Add(vert, (ushort)index);
+                        vertCount++;
                     } else {
                         index = 0;
                     }
