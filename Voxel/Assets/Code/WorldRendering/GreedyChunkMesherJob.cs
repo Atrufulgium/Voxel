@@ -217,8 +217,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
         unsafe void CreateQuad(RectMat rect, [AssumeRange(0, 31)] int layer, LayerMode currentLayerMode) {
             int2* corners = stackalloc int2[4];
 
-            int4 minmax = new int4(rect.x, rect.y, rect.x, rect.y) * scale;
+            int4 minmax = new int4(rect.x, rect.y, rect.x, rect.y);
             minmax.zw += new int2(rect.width, rect.height);
+            minmax *= scale;
             // The order matters depending on which side of course.
             corners[0] = minmax.zy; //new(rect.x + rect.width, rect.y);
             corners[1] = minmax.zw; //new(rect.x + rect.width, rect.y + rect.height);
