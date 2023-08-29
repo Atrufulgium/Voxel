@@ -146,7 +146,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             // "rectStarts" is set to 1 whenever a rectangle should start.
             // Slowly loses bits after initialisation.
             // "noRects" is set to 1 whenever a rectangle is illegal:
-            // air, and covered spaces.
+            // air, and covered spaces. This supersedes "rectStarts".
             // (And after initialisation, other rects.)
 
             // Note: data is counted from the MSB = 0.
@@ -155,50 +155,49 @@ namespace Atrufulgium.Voxel.WorldRendering {
             RectData* rectData = stackalloc RectData[max];
 
             for (int y = 0; y < max; y++) {
-                uint noRectsVal = 0;
+                // Get the data over all x SIMD 4 at a time, and then handle
+                // it SIMD 32 bits at a time.
 
-                // This keeps track of everywhere the material changes. If the
-                // materials are
-                //     0000 0011 1112 2220 0012 3443 3333 0000
-                // this wil have set bits
-                //     ____ __1_ ___1 ___1 __11 11_1 ____ 1___
-                uint changedVal = 0;
+                // Container of unrelated data so we can SIMD it.
+                uint3 bits = default;
+                ref uint covered = ref bits.x;
+                ref uint changedMat = ref bits.y;
+                ref uint airMat = ref bits.z;
 
                 uint prevMat = ushort.MaxValue;
-                bool prevCovered = false;
                 for (int x = 0; x < max; x += 4) {
-                    changedVal <<= 4;
-                    noRectsVal <<= 4;
+                    bits <<= 4;
+
                     int4 xvec = x + new int4(0,1,2,3);
                     uint4 mats = GetChunk(xvec, y, layer);
                     bool4 covereds = IsCovered(xvec, y, layer);
-
                     uint4 prevMats = mats.wxyz;
                     prevMats.x = prevMat;
-                    bool4 prevCovereds = covereds.wxyz;
-                    prevCovereds.x = prevCovered;
-
-                    // Count going covered <-> uncovered as change that
-                    // requires a new rect to start.
-                    bool4 changed = mats != prevMats;
-                    changed |= covereds != prevCovereds;
-                    changedVal += math.dot((uint4)changed, new uint4(8,4,2,1));
-
-                    // Air has no meshes
-                    // Covereds are ignored for overdraw reasons
-                    bool4 noRect = mats == 0;
-                    noRect |= covereds;
-                    noRectsVal += math.dot((uint4)noRect, new uint4(8,4,2,1));
-
                     prevMat = mats.w;
-                    prevCovered = covereds.w;
+                    // Update the three values with their respective conditions.
+                    // The x,y,z,w components correspond to the blocks.
+                    // (Note the MSB part that causes a reversed (8,4,2,1))
+                    // We will want to make them instead correspond to the
+                    // three variables in `bits` we care about.
+                    uint4x3 updatesTransposed = new(
+                        (uint4)covereds,                    // For "covered"
+                        (uint4)(mats != prevMats),          // For "changedMat"
+                        (uint4)(mats == 0)                  // For "airMat"
+                    );
+                    uint3x4 updates = math.transpose(updatesTransposed);
+                    bits += 8 * updates.c0 + 4 * updates.c1 + 2 * updates.c2 + updates.c3;
                 }
+                
+                uint changedCovered = covered ^ (covered >> 1);
+                uint noRectsVal = airMat | covered;
+                uint changedVal = changedMat | changedCovered;
+                changedVal &= ~noRectsVal; // NoRects supersedes
 
                 // We care about MSB, but if max < 32 it's not shifted enough
                 changedVal <<= (32 - max);
                 noRectsVal <<= (32 - max);
 
-                rectData[y] = new(changedVal & ~noRectsVal, noRectsVal);
+                rectData[y] = new(changedVal, noRectsVal);
             }
 
             for (int y = 0; y < max; y++) {
