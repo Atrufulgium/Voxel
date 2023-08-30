@@ -10,7 +10,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE1006:Naming Styles", Justification = "Burst!")]
     [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
-    struct GreedyChunkMesherJob : IJob {
+    public struct GreedyChunkMesherJob : IJob {
 
         /// <summary>
         /// The chunk to turn into a mesh. Of course, this takes into account

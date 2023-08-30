@@ -40,3 +40,6 @@ sysinfo.txt
 
 # This doesn't seem like it deserves a place in the repo
 UserSettings/
+
+# I would not like to commit 2.6GB-each files with sensitive info tyfm
+*.snap
