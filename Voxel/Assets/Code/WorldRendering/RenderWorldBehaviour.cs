@@ -37,7 +37,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             frame++;
             if (frame <= 3) {
                 if (world.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
-                    ChunkMesher.GetMeshAsynchronously(key, chunk, 0);
+                    ChunkMesher.RunAsynchronously<ChunkMesher>(key, (chunk, 0));
                 }
                 return;
             }
@@ -46,7 +46,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             center.y /= 20;
             ushort mat = 3;
             for (int i = 0; i < 200; i++) {
-                world.Set(center + rng.NextInt3(-4, 4), mat);
+                //world.Set(center + rng.NextInt3(-4, 4), mat);
             }
 
             for (int i = 0; i < 1000; i++) {
@@ -58,7 +58,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                     if (ChunkMesher.JobExists(key)) {
                         world.MarkDirty(key);
                     } else {
-                        ChunkMesher.GetMeshAsynchronously(key, chunk, 0);
+                        ChunkMesher.RunAsynchronously<ChunkMesher>(key, (chunk, 0));
                     }
                 }
             }
@@ -68,10 +68,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 completionCount++;
                 if (!meshes.TryGetValue(key, out MeshFilter filter))
                     filter = CreateChunkMesh(key);
-                Mesh oldMesh = filter.mesh;
-                if (ChunkMesher.TryCompleteMeshAsynchronously(key, out Mesh newMesh, in oldMesh)) {
-                    filter.mesh = newMesh;
-                }
+                Mesh mesh = filter.mesh;
+                // This already overwrites the mesh if true.
+                ChunkMesher.PollJobCompleted(key, ref mesh);
             }
             if (completionCount > 0)
                 Debug.Log($"Frame {frame}: {completionCount}");
