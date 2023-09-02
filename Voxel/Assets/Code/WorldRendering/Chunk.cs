@@ -67,6 +67,19 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         /// <summary>
+        /// <para>
+        /// Creates a new chunk with specified LoD and prefilled materials.
+        /// </para>
+        /// <para>
+        /// The materials list must fit the chunk exactly, and is a flattened
+        /// 3D list ordered as first X, then Y, then Z.
+        /// </para>
+        /// </summary>
+        public Chunk(int LoD, IEnumerable<ushort> materials) : this(LoD) {
+            FromRawArray(materials);
+        }
+
+        /// <summary>
         /// Gets and sets voxels in [0,32)^3. If the level of detail is not 0,
         /// it reads/affects the larger voxels.
         /// </summary>
@@ -188,6 +201,27 @@ namespace Atrufulgium.Voxel.WorldRendering {
         public ushort GetRaw(int index) => voxels[index];
         /// <inheritdoc cref="GetRaw(int)"/>
         public uint4 GetRaw(int4 index) => new(voxels[index.x], voxels[index.y], voxels[index.z], voxels[index.w]);
+
+        /// <summary>
+        /// Unsafe write access to overwrite the entire array contents with new
+        /// values.
+        /// </summary>
+        public void FromRawArray(IEnumerable<ushort> values) {
+            int written = 0;
+            foreach (ushort val in values) {
+                if (written >= voxels.Length)
+                    throw new ArgumentException($"There are too many values for this chunk. Expected {voxels.Length}, got more.", nameof(values));
+                voxels[written] = val;
+                written++;
+            }
+            if (written < voxels.Length)
+                throw new ArgumentException($"There are too few values for this chunk. Expected {voxels.Length}, got {written}.", nameof(values));
+        }
+
+        /// <inheritdoc cref="FromRawArray(IEnumerable{ushort})"/>
+        public void FromRawArray(Chunk values) {
+            FromRawArray(values.voxels);
+        }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 

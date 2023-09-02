@@ -8,7 +8,7 @@ namespace Atrufulgium.Voxel.Base {
 
     /// <summary>
     /// <para>
-    /// A single instance of this represents a job that that can be run with
+    /// A single instance of this represents jobs that that can be run with
     /// the result extracted. However, you will/should never instance this
     /// class.
     /// </para>
@@ -30,15 +30,38 @@ namespace Atrufulgium.Voxel.Base {
     /// </para>
     /// </summary>
     /// <typeparam name="K"> The key identifying the jobs. </typeparam>
-    /// <typeparam name="J1"> The job itself. </typeparam>
-    /// <typeparam name="TInput"> The input of the job. </typeparam>
-    /// <typeparam name="TResult"> The result of the job. </typeparam>
-    public abstract class KeyedJobManager<K, J1, TInput, TResult> : IDisposable where K : IEquatable<K> where J1 : struct, IJob {
+    /// <typeparam name="J1"> The first job. </typeparam>
+    /// <typeparam name="J2"> The second job. </typeparam>
+    /// <typeparam name="J3"> The third job. </typeparam>
+    /// <typeparam name="J4"> The fourth job. </typeparam>
+    /// <typeparam name="J5"> The fifth job. </typeparam>
+    /// <typeparam name="J6"> The sixth job. </typeparam>
+    /// <typeparam name="J7"> The seventh job. Do you reallly need this many? </typeparam>
+    /// <typeparam name="J8"> THe eighth job. Quit it. </typeparam>
+    /// <typeparam name="TInput"> The input of all the jobs. </typeparam>
+    /// <typeparam name="TResult"> The result of all the jobs. </typeparam>
+    public abstract class KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult> : IDisposable
+        where K : IEquatable<K>
+        where J1 : struct, IJob
+        where J2 : struct, IJob
+        where J3 : struct, IJob
+        where J4 : struct, IJob 
+        where J5 : struct, IJob
+        where J6 : struct, IJob
+        where J7 : struct, IJob
+        where J8 : struct, IJob {
 
-        // Whether this instance is already running a job
+        // Whether this instance is already running jobs
         bool unavailable = false;
-        JobHandle handle;
-        J1 job;
+        JobHandle finalHandle;
+        J1 job1;
+        J2 job2;
+        J3 job3;
+        J4 job4;
+        J5 job5;
+        J6 job6;
+        J7 job7;
+        J8 job8;
 
         /// <summary>
         /// Whether this job is a newly created job, or re-used instead.
@@ -48,12 +71,12 @@ namespace Atrufulgium.Voxel.Base {
         protected bool Reused { get; private set; } = false;
 
         /// <summary>
-        /// Your chance to write the relevant data into <paramref name="job"/>.
+        /// Your chance to write the relevant data into the jobs.
         /// </summary>
         /// <remarks>
         /// There is no reason to ever call this manually.
         /// </remarks>
-        public abstract void Setup(TInput input, out J1 job);
+        public abstract void Setup(TInput input, out J1 job1, out J2 job2, out J3 job3, out J4 job4, out J5 job5, out J6 job6, out J7 job7, out J8 job8);
         /// <summary>
         /// Here you can read the output of the process into <paramref name="result"/>.
         /// Note that <paramref name="result"/> may be <tt>default</tt>.
@@ -61,7 +84,7 @@ namespace Atrufulgium.Voxel.Base {
         /// <remarks>
         /// There is no reason to ever call this manually.
         /// </remarks>
-        public abstract void PostProcess(ref TResult result, in J1 job);
+        public abstract void PostProcess(ref TResult result, in J1 job1, in J2 job2, in J3 job3, in J4 job4, in J5 job5, in J6 job6, in J7 job7, in J8 job8);
 
         /// <summary>
         /// <para>
@@ -72,8 +95,15 @@ namespace Atrufulgium.Voxel.Base {
         void RunAsynchronously(TInput input) {
             if (unavailable)
                 throw new InvalidOperationException("Cannot use the same KeyedJob for multiple tasks. Use multiple instances. (Don't use this class in the first place, use the manager.)");
-            Setup(input, out job);
-            handle = job.Schedule();
+            Setup(input, out job1, out job2, out job3, out job4, out job5, out job6, out job7, out job8);
+            var handle1 = job1.Schedule();
+            var handle2 = job2.Schedule(handle1);
+            var handle3 = job3.Schedule(handle2);
+            var handle4 = job4.Schedule(handle3);
+            var handle5 = job5.Schedule(handle4);
+            var handle6 = job6.Schedule(handle5);
+            var handle7 = job7.Schedule(handle6);
+            finalHandle = job8.Schedule(handle7);
             unavailable = true;
         }
 
@@ -84,16 +114,16 @@ namespace Atrufulgium.Voxel.Base {
         bool PollJobCompleted(ref TResult result) {
             if (!unavailable)
                 throw new InvalidOperationException("Have not started any asynchronous meshing!");
-            if (!handle.IsCompleted) {
+            if (!finalHandle.IsCompleted) {
                 return false;
             }
             // I don't know *why* a handle.IsCompleted job needs a Complete()
             // call, but it does, so here we are.
-            handle.Complete();
+            finalHandle.Complete();
 
-            PostProcess(ref result, in job);
+            PostProcess(ref result, in job1, in job2, in job3, in job4, in job5, in job6, in job7, in job8);
 
-            handle = default;
+            finalHandle = default;
             unavailable = false;
             return true;
         }
@@ -104,7 +134,7 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         void RunSynchronously(TInput input, ref TResult result) {
             RunAsynchronously(input);
-            handle.Complete();
+            finalHandle.Complete();
             PollJobCompleted(ref result);
         }
 
@@ -121,7 +151,7 @@ namespace Atrufulgium.Voxel.Base {
                 Debug.LogWarning($"There are still {activeJobbers.Count} active jobs. Forcing them to finish before disposing them, but this might take a while!");
 
                 foreach(var jobber in activeJobbers.Values) {
-                    jobber.handle.Complete();
+                    jobber.finalHandle.Complete();
                     jobber.Dispose();
                 }
                 activeJobbers.Clear();
@@ -131,8 +161,8 @@ namespace Atrufulgium.Voxel.Base {
             }
         }
 
-        static readonly Stack<KeyedJobManager<K, J1, TInput, TResult>> idleJobbers = new();
-        static readonly Dictionary<K, KeyedJobManager<K, J1, TInput, TResult>> activeJobbers = new();
+        static readonly Stack<KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult>> idleJobbers = new();
+        static readonly Dictionary<K, KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult>> activeJobbers = new();
 
         /// <summary>
         /// Starts running a job, based on <paramref name="input"/>, associating
@@ -144,11 +174,11 @@ namespace Atrufulgium.Voxel.Base {
         /// same as the class, like so:
         /// <code> ChunkMesher.RunAsynchronously&lt;ChunkMesher&gt;(..) </code>
         /// </remarks>
-        public static void RunAsynchronously<TManager>(K key, TInput input) where TManager : KeyedJobManager<K, J1, TInput, TResult>, new() {
+        public static void RunAsynchronously<TManager>(K key, TInput input) where TManager : KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult>, new() {
             if (JobExists(key))
                 throw new ArgumentException("The given key already has an asssociated job, so it cannot have a new one.");
 
-            KeyedJobManager<K, J1, TInput, TResult> keyedJob;
+            KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult> keyedJob;
             if (idleJobbers.Count == 0) {
                 keyedJob = new TManager();
             } else {
@@ -164,8 +194,8 @@ namespace Atrufulgium.Voxel.Base {
         /// complete. As that is usually the main Unity thread, this method is
         /// a <b>bad idea</b> unless you're forced your hand.
         /// </summary>
-        public static void RunSynchronously<TManager>(TInput input, ref TResult result) where TManager : KeyedJobManager<K, J1, TInput, TResult>, new() {
-            KeyedJobManager<K, J1, TInput, TResult> keyedJob;
+        public static void RunSynchronously<TManager>(TInput input, ref TResult result) where TManager : KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult>, new() {
+            KeyedJobManager<K, J1, J2, J3, J4, J5, J6, J7, J8, TInput, TResult> keyedJob;
             if (idleJobbers.Count == 0) {
                 keyedJob = new TManager();
             } else {
@@ -200,7 +230,7 @@ namespace Atrufulgium.Voxel.Base {
         public static IEnumerable<K> GetAllCompletedJobs(int maxCompletions = int.MaxValue) {
             int completed = 0;
             foreach((var key, var jobber) in Enumerators.EnumerateCopy(activeJobbers)) {
-                if (jobber.handle.IsCompleted) {
+                if (jobber.finalHandle.IsCompleted) {
                     yield return key;
                     completed++;
                     if (completed >= maxCompletions)

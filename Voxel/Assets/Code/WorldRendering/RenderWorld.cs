@@ -66,6 +66,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
             dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
         }
 
+        public bool TryGetChunk(ChunkKey key, out Chunk chunk)
+            => allChunks.TryGetValue(key, out chunk);
+
         /// <summary>
         /// Sets the chunk location to be a chunk made of a single material.
         /// </summary>

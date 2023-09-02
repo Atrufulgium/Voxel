@@ -15,7 +15,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
     /// </summary>
     // There's some commented code that's helpful when debugging. Please keep it.
     [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
-    struct BitFloodfillJob : IJob {
+    public struct BitFloodfillJob : IJob {
         /// <summary>
         /// <para>
         /// A 3D array with each axis up to 32 of length
@@ -41,23 +41,18 @@ namespace Atrufulgium.Voxel.WorldRendering {
         internal NativeReference<int> maxIndex;
 
         /// <summary>
-        /// An array in the same format as <see cref="allowsFloodfill"/>.
-        /// All positions the floodfill starts from. Must be a subset of
-        /// <see cref="allowsFloodfill"/> (and this is not checked).
-        /// </summary>
-        [ReadOnly]
-        internal NativeArray<uint> startingPositions;
-
-        /// <summary>
         /// <para>
-        /// An array in the same format as <see cref="allowsFloodfill"/>. The
-        /// result will be a subset of <see cref="allowsFloodfill"/>.
+        /// Before running: an array in the same format as
+        /// <see cref="allowsFloodfill"/>. All positions the floodfill starts
+        /// from are set to 1. Must be a subset of <see cref="allowsFloodfill"/>
+        /// (and this is not checked).
         /// </para>
         /// <para>
-        /// Values of <tt>1</tt> represent being reached by this floodfill.
+        /// After running: values of <tt>1</tt> represent being reached by
+        /// this floodfill.
         /// </para>
         /// </summary>
-        internal NativeArray<uint> result;
+        internal NativeArray<uint> arena;
 
         [SkipLocalsInit] // Don't zero-init stackallocs
         unsafe public void Execute() {
@@ -76,8 +71,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             maxY = maxZ / 4;
 
             uint4* allowsFloodfill = (uint4*)this.allowsFloodfill.GetUnsafeReadOnlyPtr();
-            uint4* startingPositions = (uint4*)this.startingPositions.GetUnsafeReadOnlyPtr();
-            uint4* result = (uint4*)this.result.GetUnsafePtr();
+            uint4* arena = (uint4*)this.arena.GetUnsafePtr();
 
             #region scheduling
             // Z-axis: inside the uint itself.
@@ -118,8 +112,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
             for (int y = 0; y < maxY; y++) {
                 for (int z = 0; z < maxZ; z++) {
                     int index = y + maxY * z;
-                    if (math.any(startingPositions[index] != 0)) {
-                        result[index] = startingPositions[index];
+                    if (math.any(arena[index] != 0)) {
+                        arena[index] = arena[index];
                         Push(new(y, z));
                     }
                 }
@@ -139,12 +133,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 ref bool largeY = ref large.x;
                 ref bool largeZ = ref large.y;
 
-                uint4* curr = result + (y + maxY * z);      // Always safe to access
+                uint4* curr = arena + (y + maxY * z);      // Always safe to access
                 uint4* prev = (uint4*)((uint*)curr - 1);    // Safe if largeY
                 uint4* next = (uint4*)((uint*)curr + 1);    // Safe if smallY
                 uint4* left = curr - maxY;                  // Safe if largeZ
                 uint4* righ = curr + maxY;                  // Safe if smallZ
-                long pointerDiff = allowsFloodfill - result;
+                long pointerDiff = allowsFloodfill - arena;
                 uint4* currAllowed = curr + pointerDiff;    // Always safe to access
                 uint4* prevAllowed = prev + pointerDiff;    // Safe if largeY
                 uint4* nextAllowed = next + pointerDiff;    // safe if smallY
@@ -188,6 +182,20 @@ namespace Atrufulgium.Voxel.WorldRendering {
                     righVal |= currVal & *righAllowed;
 
                 // Assign back and schedule if changed and unscheduled.
+                // Prioritise widening the X-axis as | is OP for Y, and
+                // _especially_ Z down the line.
+                // After that, prioritise the Y axis as moving Y across Z
+                // with the SIMD is still 4x moving Z across Y.
+                if (math.any(leftVal != leftValOld)) {
+                    *left = leftVal;
+                    if (!TestScheduled(y, z - 1))
+                        Push(new(y, z - 1));
+                }
+                if (math.any(righVal != righValOld)) {
+                    *righ = righVal;
+                    if (!TestScheduled(y, z + 1))
+                        Push(new(y, z + 1));
+                }
                 if (math.any(prevVal != prevValOld)) {
                     *prev = prevVal;
                     if (!TestScheduled(y-1, z))
@@ -198,18 +206,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
                     if (!TestScheduled(y+1, z))
                         Push(new(y+1, z));
                 }
-                if (math.any(leftVal != leftValOld)) {
-                    *left = leftVal;
-                    if (!TestScheduled(y, z-1))
-                        Push(new(y, z-1));
-                }
-                if (math.any(righVal != righValOld)) {
-                    *righ = righVal;
-                    if (!TestScheduled(y, z+1))
-                        Push(new(y, z+1));
-                }
-                // Prioritise widening the X-axis as | is OP for Y, and
-                // _especially_ Z down the line.
                 if (Hint.Likely(math.any(currVal != currValOld))) {
                     *curr = currVal;
                     if (!TestScheduled(y, z))
@@ -232,7 +228,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 //            0 => "x ", 1 => "y ", 2 => "z ", 3 => "w ", _ => ""
                 //        };
                 //        for (int pz = 0; pz < maxZ; pz++) { 
-                //            s += Convert.ToString(TryGet(new(py, pz), true)[sub], 2).PadLeft(maxZ, '0').Replace('0', '_');
+                //            s += Convert.ToString(result[py + maxY * pz][sub], 2).PadLeft(maxZ, '0').Replace('0', '_');
                 //            s += "   ";
                 //        }
                 //        s += "\n";

@@ -10,6 +10,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
     /// Provides both instance methods for one mesh job at a time, as well as
     /// static methods for handling many meshings asynchronously.
     /// </summary>
+    // TODO: I've not implemented reusing yet, expect dispose errors.
+    // TODO: When rendering a full chunk face, it adds a final row of small quads for no reason overlapping with the big one. This only applies to LoD 0.
     public class ChunkMesher : KeyedJobManager<
         /* key */ ChunkKey,
         /* job */ GreedyChunkMesherJob,

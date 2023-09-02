@@ -50,5 +50,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         public override int GetHashCode()
             => value.GetHashCode();
+
+        public override string ToString()
+            => value.ToString();
     }
 }
