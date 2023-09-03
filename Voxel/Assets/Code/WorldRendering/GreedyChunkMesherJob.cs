@@ -314,6 +314,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
             // Also add rectangle starts to the side of the rectangle where
             // applicable, because otherwise it won't generate anymore.
             uint newRectMask = 0x8000_0000 >> x2;
+            if (x2 == 32) // I hate the >> semantics.
+                newRectMask = 0;
             newRectMask &= AllOnesUpTo(max);
 
             int y2 = y + 1;
