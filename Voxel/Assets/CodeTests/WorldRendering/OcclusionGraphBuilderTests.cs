@@ -1,4 +1,5 @@
-﻿using NUnit.Framework;
+﻿using Atrufulgium.Voxel.World;
+using NUnit.Framework;
 
 namespace Atrufulgium.Voxel.WorldRendering.Tests {
     // These tests are for 4x4x4 chunks only (as you can still write those down

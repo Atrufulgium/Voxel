@@ -1,11 +1,7 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
-using Unity.Collections;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.WorldRendering {
-
+namespace Atrufulgium.Voxel.World {
     /// <summary>
     /// An indexer for chunks in the <see cref="RenderWorld"/>.
     /// Construct it via either of <see cref="FromWorldPos(int3)"/> or
@@ -43,15 +39,27 @@ namespace Atrufulgium.Voxel.WorldRendering {
             => new(key);
 
         public bool Equals(ChunkKey other)
-            => math.all(value == other.value);
+            => this == other;
 
         public override bool Equals(object obj)
-            => obj is ChunkKey other && Equals(other);
+            => obj is ChunkKey other && this == other;
+
+        public static bool operator ==(ChunkKey a, ChunkKey b)
+            => math.all(a.value == b.value);
+
+        public static bool operator !=(ChunkKey a, ChunkKey b)
+            => !(a == b);
 
         public override int GetHashCode()
             => value.GetHashCode();
 
         public override string ToString()
             => value.ToString();
+
+        /// <summary>
+        /// Offsets a given key by a number of chunks.
+        /// </summary>
+        public static ChunkKey operator +(ChunkKey key, int3 chunkOffset)
+            => FromKey(key.KeyValue + chunkOffset);
     }
 }

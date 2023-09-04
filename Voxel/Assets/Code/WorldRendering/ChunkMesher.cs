@@ -1,4 +1,5 @@
 ﻿using Atrufulgium.Voxel.Base;
+using Atrufulgium.Voxel.World;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -39,8 +40,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             var viewDir = input.viewDir;
 
             // Unfortunately we actually need to clear the table, psh
-            for (int i = 0; i < vertToIndex.Length; i++)
-                vertToIndex[i] = default;
+            vertToIndex.Clear();
 
             job = new GreedyChunkMesherJob {
                 chunk = chunk.GetCopy(),

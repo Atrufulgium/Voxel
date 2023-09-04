@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Atrufulgium.Voxel.World;
+using System;
 using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Burst.CompilerServices;

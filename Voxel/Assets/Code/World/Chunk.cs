@@ -1,11 +1,13 @@
+using Atrufulgium.Voxel.Base;
 using Atrufulgium.Voxel.Collections;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
-namespace Atrufulgium.Voxel.WorldRendering {
+namespace Atrufulgium.Voxel.World {
 
     /// <summary>
     /// Represents a 32x32x32 cube of voxels.
@@ -83,6 +85,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// Gets and sets voxels in [0,32)^3. If the level of detail is not 0,
         /// it reads/affects the larger voxels.
         /// </summary>
+        public ushort this[int x, int y, int z] {
+            get => this[new int3(x, y, z)];
+            set => this[new int3(x, y, z)] = value;
+        }
+
+        /// <inheritdoc cref="this[int, int, int]"/>
         public ushort this[int3 coord] { 
             get => voxels[CoordToIndex(coord)];
             set => voxels[CoordToIndex(coord)] = value;
@@ -160,6 +168,13 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         /// <summary>
+        /// Clears this chunk with air.
+        /// </summary>
+        public void Clear() {
+            voxels.Clear();
+        }
+
+        /// <summary>
         /// Creates a copy of the chunk, including a copy of the voxel data.
         /// </summary>
         public Chunk GetCopy() {
@@ -217,11 +232,23 @@ namespace Atrufulgium.Voxel.WorldRendering {
             if (written < voxels.Length)
                 throw new ArgumentException($"There are too few values for this chunk. Expected {voxels.Length}, got {written}.", nameof(values));
         }
-
         /// <inheritdoc cref="FromRawArray(IEnumerable{ushort})"/>
         public void FromRawArray(Chunk values) {
             FromRawArray(values.voxels);
         }
+
+        /// <summary>
+        /// Returns a pointer to the underlying array.
+        /// </summary>
+        public unsafe ushort* GetUnsafeUnderlyingPtr()
+            => (ushort*) voxels.GetUnsafePtr();
+
+        /// <summary>
+        /// Returns a read-only pointer to the underlying array.
+        /// </summary>
+        public unsafe ushort* GetUnsafeUnderlyingReadOnlyPtr()
+            => (ushort*)voxels.GetUnsafeReadOnlyPtr();
+
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 

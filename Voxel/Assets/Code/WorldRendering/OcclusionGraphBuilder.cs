@@ -1,4 +1,5 @@
 ﻿using Atrufulgium.Voxel.Base;
+using Atrufulgium.Voxel.World;
 using Unity.Collections;
 
 namespace Atrufulgium.Voxel.WorldRendering {
