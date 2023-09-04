@@ -3,7 +3,7 @@ using Unity.Mathematics;
 using UnityEngine;
 
 namespace Atrufulgium.Voxel.Collections {
-    internal static class Enumerators {
+    public static class Enumerators {
 
         /// <summary>
         /// <inheritdoc cref="EnumerateVolume(int3)"/>
@@ -127,6 +127,105 @@ namespace Atrufulgium.Voxel.Collections {
                     foreach (T3 t3 in ts.Item3)
                         foreach (T4 t4 in ts.Item4)
                             yield return (t1, t2, t3, t4);
+        }
+
+        /// <summary>
+        /// <para>
+        /// Enumerates a diamond grid. Starting out from the center, it returns
+        /// in order the following coordinates:
+        /// <code>
+        /// X→Y↑   7 ..
+        ///     8  2  6 ..
+        ///  9  3  0  1  5 13
+        ///    10  4 12
+        ///       11
+        /// </code>
+        /// In words, every diamond circle starts at (x,0) and goes counter-clockwise.
+        /// </para>
+        /// <para>
+        /// This enumeration goes on forever. Once you have handled a
+        /// sufficient number of layers (detectable by whether x = k for some
+        /// k for the first time), or a sufficient number of blocks (detectable
+        /// by just keeping track), break from the loop.
+        /// </para>
+        /// </summary>
+        public static IEnumerable<int2> EnumerateDiamondInfinite2D(int2 center = default) {
+            int2 current = 0;
+            yield return center;
+            while (true) {
+                // The initial outset of a ring.
+                current.x++;
+                yield return center + current;
+                // Now at (k,0). Move ↖ until x = 0.
+                while (current.x > 0) {
+                    current += new int2(-1, 1);
+                    yield return center + current;
+                }
+                // Now at (0,k). Move ↙ until y= 0.
+                while (current.y > 0) {
+                    current += new int2(-1, -1);
+                    yield return center + current;
+                }
+                // Now at (-k, 0). Move ↘ until x = 0.
+                while (current.x < 0) {
+                    current += new int2(1, -1);
+                    yield return center + current;
+                }
+                // Now at (0, -k). Move ↗ until y = -1 to complete the ring.
+                while (current.y < -1) {
+                    current += new int2(1, 1);
+                    yield return center + current;
+                }
+                // Don't return this last one
+                current += new int2(1, 1);
+            }
+        }
+
+        /// <summary>
+        /// <para>
+        /// The 3d equivalent of <see cref="EnumerateDiamondInfinite2D(int2)"/>.
+        /// Each layer is done in slices, ordered from +X to -X. Each
+        /// individual slice is done by the 2d version.
+        /// </para>
+        /// <para>
+        /// As such, checking whether you have finished k layers can still be
+        /// done by checking when the x component reaches k+1.
+        /// </para>
+        /// </summary>
+        public static IEnumerable<int3> EnumerateDiamondInfinite3D(int3 center = default) {
+            yield return center;
+            int layerIndex = 1;
+            while (true) {
+                // The code below does not work for the single-block case.
+                yield return center + new int3(layerIndex, 0, 0);
+                for (int x = layerIndex - 1; x >= -layerIndex + 1; x--) {
+                    int max = layerIndex - math.abs(x);
+                    int2 current2D = new(max, 0);
+                    yield return center + new int3(x, current2D);
+                    // Now at (k,0). Move ↖ until x = 0.
+                    while (current2D.x > 0) {
+                        current2D += new int2(-1, 1);
+                        yield return center + new int3(x, current2D);
+                    }
+                    // Now at (0,k). Move ↙ until y= 0.
+                    while (current2D.y > 0) {
+                        current2D += new int2(-1, -1);
+                        yield return center + new int3(x, current2D);
+                    }
+                    // Now at (-k, 0). Move ↘ until x = 0.
+                    while (current2D.x < 0) {
+                        current2D += new int2(1, -1);
+                        yield return center + new int3(x, current2D);
+                    }
+                    // Now at (0, -k). Move ↗ until y = -1 to complete the ring.
+                    while (current2D.y < -1) {
+                        current2D += new int2(1, 1);
+                        yield return center + new int3(x, current2D);
+                    }
+                }
+                yield return center + new int3(-layerIndex, 0, 0);
+                layerIndex++;
+            }
         }
     }
 }
