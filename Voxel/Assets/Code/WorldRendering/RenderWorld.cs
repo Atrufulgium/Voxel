@@ -1,115 +1,61 @@
 ﻿using Atrufulgium.Voxel.Collections;
-using System;
+using Atrufulgium.Voxel.World;
 using System.Collections.Generic;
 using Unity.Mathematics;
 
 namespace Atrufulgium.Voxel.WorldRendering {
     /// <summary>
-    /// Stores a collection of chunks.
+    /// Stores a collection of chunks. The difference with
+    /// <see cref="GameWorld"/> is that this only contains the chunks
+    /// that are relevant for rendering.
     /// </summary>
-    public class RenderWorld : IDisposable {
-
-        static readonly Dictionary<int, RenderWorld> knownWorlds = new();
+    public class RenderWorld {
 
         /// <summary>
-        /// Creates a new world with a unique id.
+        /// In order to properly order chunk rendering and requests for a
+        /// large radius, a center point is needed.
         /// </summary>
-        public RenderWorld(int id) {
-            if (knownWorlds.ContainsKey(id))
-                throw new ArgumentException($"A world with id {id} already exists.", nameof(id));
-
-            knownWorlds.Add(id, this);
-        }
+        public float3 CenterPoint { get; set; }
+        /// <summary>
+        /// How many chunks in each direction to load.
+        /// </summary>
+        public int RenderDistance { get; set; }
 
         /// <summary>
-        /// All chunks stored in this world.
+        /// All chunks stored in this world. Note that all of these chunks are
+        /// the live chunks, so no disposal necessary here.
         /// </summary>
         readonly Dictionary<ChunkKey, Chunk> allChunks = new();
         /// <summary>
         /// All chunks that have been modified whose modifications have only
-        /// been applied to the voxel array and not the world yet.
+        /// been applied to the voxel array and not the rendering yet.
         /// </summary>
         readonly PriorityQueueSet<ChunkKey, float> dirtyChunks = new();
 
-        /// <summary>
-        /// Sets a position in this region to a voxel material.
-        /// </summary>
-        /// <param name="newLoD">
-        /// If a new chunk is introduced by this action, sets its LoD to this
-        /// value.
-        /// </param>
-        public void Set(int3 position, ushort material, int newLoD = 0) {
-            ChunkKey key = ChunkKey.FromWorldPos(position, out int3 chunkPos);
-            if (allChunks.TryGetValue(key, out Chunk chunk)) {
-                chunk[chunkPos] = material;
-                // No need to reupdate the Dictionary as we're changing a
-                // value of an underlying NativeCollection.
-            } else {
-                chunk = new(newLoD);
-                chunk[chunkPos] = material;
-                allChunks.Add(key, chunk);
-            }
-            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
+        public RenderWorld(GameWorld world) {
+            world.ChunkUpdated += HandleChunkUpdate;
         }
 
-        /// <summary>
-        /// Sets a chunk location to be a given chunk. The existing chunk will
-        /// be forgotten, so do not access its native contents afterwards.
-        /// </summary>
-        public void SetChunk(ChunkKey key, Chunk chunk) {
-            if (allChunks.TryGetValue(key, out Chunk oldChunk)) {
-                oldChunk.Dispose();
+        void HandleChunkUpdate(object sender, ChunkUpdatedEventArgs e) {
+            Chunk chunk = e.Chunk;
+            ChunkKey key = e.Key;
+            float dist = Distance(key);
+            //if (dist > RenderDistance)
+            //    return;
+
+            if (allChunks.ContainsKey(key))
                 allChunks[key] = chunk;
-            } else {
+            else
                 allChunks.Add(key, chunk);
-            }
-            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
-        }
-
-        public bool TryGetChunk(ChunkKey key, out Chunk chunk)
-            => allChunks.TryGetValue(key, out chunk);
-
-        /// <summary>
-        /// Sets the chunk location to be a chunk made of a single material.
-        /// </summary>
-        public void SetChunk(ChunkKey key, ushort material) {
-            if (!allChunks.TryGetValue(key, out Chunk chunk)) {
-                chunk = new(0);
-            }
-            foreach (var (pos, _) in chunk) {
-                chunk[pos] = material;
-            }
-            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
+            dirtyChunks.Enqueue(key, dist);
         }
 
         /// <summary>
-        /// Sets an existing chunk's LoD. Does nothing for nonexistent chunks.
+        /// Removes a given chunk from rendering.
         /// </summary>
-        public void SetChunkLoD(ChunkKey key, int LoD) {
-            if (allChunks.TryGetValue(key, out Chunk chunk) && chunk.LoD != LoD) {
-                chunk = chunk.WithLoD(LoD);
-                allChunks[key] = chunk;
-                dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
-            }
-        }
-
-        /// <summary>
-        /// <para>
-        /// Attempts to get the voxel value of a position in the world.
-        /// </para>
-        /// <para>
-        /// If the chunk does not exist, it returns <tt>false</tt> and outputs
-        /// air. Depending on your application, this may be fine.
-        /// </para>
-        /// </summary>
-        public bool TryGet(int3 position, out ushort material) {
-            ChunkKey key = ChunkKey.FromWorldPos(position, out int3 chunkPos);
-            if (allChunks.TryGetValue(key, out Chunk chunk)) {
-                material = chunk[chunkPos];
-                return true;
-            }
-            material = 0;
-            return false;
+        public void RemoveChunk(ChunkKey key) {
+            if (allChunks.ContainsKey(key))
+                allChunks.Remove(key);
         }
 
         /// <summary>
@@ -128,36 +74,18 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// Marks a given chunk to be dirty without any reason.
         /// </summary>
         public void MarkDirty(ChunkKey key) {
-            dirtyChunks.Enqueue(key, math.lengthsq(key.Worldpos));
+            dirtyChunks.Enqueue(key, 0);
         }
 
         /// <summary>
-        /// Returns whether a given world ID exists.
+        /// The distance (in chunks) between a point and chunk center.
         /// </summary>
-        public static bool WorldExists(int id)
-            => knownWorlds.ContainsKey(id);
+        float Distance(ChunkKey key) => math.distance(key.Worldpos + 16, CenterPoint) / 32;
 
         /// <summary>
-        /// If the given world exists, returns it.
+        /// Iterate over all ChunkKeys of chunks being rendered.
         /// </summary>
-        public static bool TryGetWorld(int id, out RenderWorld world)
-            => knownWorlds.TryGetValue(id, out world);
-
-        /// <summary>
-        /// Removes an existing world.
-        /// </summary>
-        public static void RemoveWorld(int id) {
-            if (!TryGetWorld(id, out RenderWorld world))
-                throw new ArgumentException($"World id {id} does not exist and cannot be removed.");
-
-            knownWorlds.Remove(id);
-            world.Dispose();
-        }
-
-        public void Dispose() {
-            foreach(var (_, chunk) in allChunks) {
-                chunk.Dispose();
-            }
-        }
+        public IEnumerable<ChunkKey> RenderedChunks()
+            => Enumerators.EnumerateCopy(allChunks.Keys);
     }
 }

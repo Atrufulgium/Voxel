@@ -1,127 +1,147 @@
-﻿using System.Collections.Generic;
+﻿using Atrufulgium.Voxel.World;
+using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
+using static UnityEditor.PlayerSettings;
+using Atrufulgium.Voxel.Collections;
 
 namespace Atrufulgium.Voxel.WorldRendering {
     public class RenderWorldBehaviour : MonoBehaviour {
 
-        RenderWorld world;
+        GameWorld world;
+        RenderWorld renderWorld;
         ChunkMesher mesher;
         new Transform transform;
-
-        Unity.Mathematics.Random rng;
+        /// <summary>
+        /// When requesting chunks, only update when we change position
+        /// at the chunk-scale.
+        /// </summary>
+        ChunkKey previousCenter = ChunkKey.FromWorldPos(int.MaxValue);
+        /// <summary>
+        /// Whether the previous chunk request was limited by going over
+        /// <see cref="MAXPERFRAME"/> requests.
+        /// </summary>
+        bool previousChunkRequestWasLimited = false;
 
         static Material voxelMat;
 
         Dictionary<ChunkKey, MeshFilter> meshes = new();
 
+        [Range(1,128)]
+        public int RenderDistance = 16;
+        int previousRenderDistance;
+        public Camera mainCamera;
+
+        const int MAXPERFRAME = 1000;
+
         private void Awake() {
             if (voxelMat == null)
                 voxelMat = Resources.Load<Material>("Materials/Voxel");
-
-            if (RenderWorld.WorldExists(0)) {
-                RenderWorld.RemoveWorld(0);
+            if (mainCamera == null) {
+                mainCamera = Camera.main;
+                Debug.LogWarning("No camera was given to a RenderWorldBehaviour. Defaulted to the main camera, but please fill the main camera field in.");
             }
-            world = new RenderWorld(0);
+
+            world = new();
+            renderWorld = new RenderWorld(world) {
+                RenderDistance = RenderDistance,
+                CenterPoint = mainCamera.transform.position
+            };
             mesher = new();
             transform = GetComponent<Transform>();
 
-            rng = new(230000);
-
-            Generate();
+            previousRenderDistance = RenderDistance;
         }
 
-        int frame = 0;
-
         private void Update() {
-            frame++;
-            if (frame <= 3) {
-                if (world.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
-                    ChunkMesher.RunAsynchronously<ChunkMesher>(key, (chunk, 0));
-                }
-                return;
+            float3 pos = mainCamera.transform.position;
+            renderWorld.RenderDistance = RenderDistance;
+            renderWorld.CenterPoint = pos;
+
+            ChunkKey currentCenter = ChunkKey.FromWorldPos((int3)pos);
+
+            if (previousChunkRequestWasLimited || currentCenter != previousCenter || RenderDistance > previousRenderDistance) {
+                RequestMoreChunks(currentCenter);
             }
 
-            int3 center = rng.NextInt3(-200, 200);
-            center.y /= 20;
-            ushort mat = 3;
-            for (int i = 0; i < 200; i++) {
-                //world.Set(center + rng.NextInt3(-4, 4), mat);
-            }
+            previousCenter = currentCenter;
+            previousRenderDistance = RenderDistance;
 
-            for (int i = 0; i < 1000; i++) {
-                if (world.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
+            for (int i = 0; i < MAXPERFRAME; i++) {
+                if (renderWorld.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
                     // If it's active already, put it at the end of the queue to
                     // try again later.
                     // This may only be needed if the race conditions are in our
                     // disadvantage (which they always are, of course).
                     if (ChunkMesher.JobExists(key)) {
-                        world.MarkDirty(key);
+                        renderWorld.MarkDirty(key);
                     } else {
                         ChunkMesher.RunAsynchronously<ChunkMesher>(key, (chunk, 0));
                     }
                 }
             }
 
-            int completionCount = 0;
+            foreach (var key in WorldGen.GetAllCompletedJobs())
+                WorldGen.PollJobCompleted(key, ref world);
+
             foreach(var key in ChunkMesher.GetAllCompletedJobs()) {
-                completionCount++;
                 if (!meshes.TryGetValue(key, out MeshFilter filter))
                     filter = CreateChunkMesh(key);
                 Mesh mesh = filter.mesh;
-                // This already overwrites the mesh if true.
-                ChunkMesher.PollJobCompleted(key, ref mesh);
+                // This already overwrites the mesh if true and does nothing
+                // when false.
+                if (ChunkMesher.PollJobCompleted(key, ref mesh)) {
+                    // Enqueue for occlusion
+                }
             }
-            if (completionCount > 0)
-                Debug.Log($"Frame {frame}: {completionCount}");
+            foreach (var key in OcclusionGraphBuilder.GetAllCompletedJobs()) {
+                ChunkVisibility visibility = default;
+                OcclusionGraphBuilder.PollJobCompleted(key, ref visibility);
+            }
+        }
+
+        void RequestMoreChunks(ChunkKey center) {
+            int requested = 0;
+            foreach (int3 add in Enumerators.EnumerateDiamondInfinite3D()) {
+                // We need to render up to the corners. Reaching corners takes
+                // thrice as long as the axes, and we also go over a bunch we
+                // don't need.
+                if (add.x > 3 * RenderDistance)
+                    break;
+                if (math.any(math.abs(add) > RenderDistance))
+                    continue;
+
+                ChunkKey requestKey = center + add;
+                if (world.ChunkIsLoadedOrLoading(requestKey))
+                    continue;
+
+                if (requested < MAXPERFRAME) {
+                    world.LoadChunk(requestKey);
+                    requested++;
+                } else {
+                    break;
+                }
+            }
+            previousChunkRequestWasLimited = requested == MAXPERFRAME;
         }
 
         private void OnDestroy() {
             world.Dispose();
             mesher.Dispose();
+            WorldGen.DisposeStatic();
             ChunkMesher.DisposeStatic();
+            OcclusionGraphBuilder.DisposeStatic();
         }
 
         private MeshFilter CreateChunkMesh(ChunkKey key) {
             GameObject newObject = new("(Chunk)", typeof(MeshFilter), typeof(MeshRenderer));
+            newObject.hideFlags = HideFlags.HideInHierarchy;
             newObject.transform.SetParent(transform);
             newObject.transform.position = (float3)key.Worldpos;
             MeshFilter filter = newObject.GetComponent<MeshFilter>();
             newObject.GetComponent<MeshRenderer>().material = voxelMat;
             meshes.Add(key, filter);
             return filter;
-        }
-
-        private void Generate() {
-            //for (int z = 0; z < 32; z++) {
-            //    for (int y = 0; y < 32; y++) {
-            //        for (int x = 0; x < 32; x++)
-            //            if (math.length(new int3(x, y, z) - 16) < 16)
-            //                world.Set(new(x, y, z), 4, 2);
-            //    }
-            //}
-            //return;
-
-            int radius = 300;
-            for (int x = -radius; x < radius; x++) {
-                int bound = (int)math.sqrt(radius*radius - x * x);
-                for (int z = -bound; z < bound; z++) {
-                    float height
-                        =  1 * Mathf.PerlinNoise(x /  1f, z /  1f)
-                        +  2 * Mathf.PerlinNoise(x /  2f, z /  2f)
-                        +  4 * Mathf.PerlinNoise(x /  4f, z /  4f)
-                        +  8 * Mathf.PerlinNoise(x /  8f, z /  8f)
-                        + 16 * Mathf.PerlinNoise(x / 16f, z / 16f)
-                        + Mathf.Abs(x/10)
-                        + Mathf.Abs(z/10);
-                    int LoD = Mathf.Clamp(Mathf.FloorToInt(new Vector2(x, z).magnitude / 100f), 0, 5);
-                    for (int y = -15; y < height - 10; y++)
-                        world.Set(new(x, y, z), 2, LoD);
-                    world.Set(new(x, (int)height - 10, z), 1, LoD);
-                    if ((int)height % 2 == 1)
-                        world.Set(new(x, (int)height - 11, z), 1, LoD);
-                }
-            }
         }
     }
 }

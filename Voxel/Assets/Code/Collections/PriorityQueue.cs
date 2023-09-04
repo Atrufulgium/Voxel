@@ -5,7 +5,8 @@ using System.Linq;
 
 namespace Atrufulgium.Voxel.Collections {
     /// <summary>
-    /// A priority-queue with FIFO for same-priority elements.
+    /// A priority-queue with FIFO for same-priority elements. Lower elements
+    /// are prioritised over higher elements.
     /// </summary>
     /// <remarks>
     /// <para>
