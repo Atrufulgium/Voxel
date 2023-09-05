@@ -20,6 +20,7 @@ namespace Atrufulgium.Voxel.World {
         public Chunk chunk;
 
         float2 heightmapOffset;
+        float3 cavesOffset;
 
         Random rng;
 
@@ -32,23 +33,30 @@ namespace Atrufulgium.Voxel.World {
             rng = random.Value;
 
             heightmapOffset = rng.NextFloat2(-99999, 99999);
+            cavesOffset = rng.NextFloat3(-99999, 99999);
 
             for (int z = 0; z < max; z++) {
-                for (int y = 0; y < max; y++) {
-                    for (int x = 0; x < max; x++) {
+                for (int x = 0; x < max; x++) {
+                    int height = (int)(noise.snoise((basePos.xz + new float2(x, z) * voxelSize) * 0.02f + heightmapOffset) * 20) + 20;
+                    for (int y = 0; y < max; y++) {
                         int index = x + max * (y + max * z);
-                        ushort mat = GetMaterial(basePos + new int3(x, y, z) * voxelSize);
+                        ushort mat = GetMaterial(basePos + new int3(x, y, z) * voxelSize, height);
                         arr[index] = mat;
                     }
                 }
             }
         }
 
-        ushort GetMaterial(int3 pos) {
-            int height = (int)(noise.snoise((float2)pos.xz * 0.02f + heightmapOffset) * 20);
+        ushort GetMaterial(int3 pos, int height) {
+            ushort mat = 0;
             if (pos.y < height)
-                return 3;
-            return 0;
+                mat = 3;
+            noise.snoise((float3)pos * 0.003f + cavesOffset, out float3 gradient);
+            gradient *= math.clamp(height * 0.05f, 0.5f, 1f);
+            int3 largeGradient = (int3)(math.abs(gradient) > 0.7f);
+            if (math.lengthsq(largeGradient) == 1)
+                mat = 0;
+            return mat;
         }
     }
 }

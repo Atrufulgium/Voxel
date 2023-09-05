@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
-using static UnityEditor.PlayerSettings;
 using Atrufulgium.Voxel.Collections;
 
 namespace Atrufulgium.Voxel.WorldRendering {
@@ -32,7 +31,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         int previousRenderDistance;
         public Camera mainCamera;
 
-        const int MAXPERFRAME = 1000;
+        const int MAXPERFRAME = 500;
 
         private void Awake() {
             if (voxelMat == null)
@@ -127,6 +126,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         private void OnDestroy() {
             world.Dispose();
+            renderWorld.Dispose();
             mesher.Dispose();
             WorldGen.DisposeStatic();
             ChunkMesher.DisposeStatic();

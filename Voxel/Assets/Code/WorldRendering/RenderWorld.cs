@@ -1,5 +1,6 @@
 ﻿using Atrufulgium.Voxel.Collections;
 using Atrufulgium.Voxel.World;
+using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 
@@ -9,7 +10,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
     /// <see cref="GameWorld"/> is that this only contains the chunks
     /// that are relevant for rendering.
     /// </summary>
-    public class RenderWorld {
+    public class RenderWorld : IDisposable {
 
         /// <summary>
         /// In order to properly order chunk rendering and requests for a
@@ -32,8 +33,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// </summary>
         readonly PriorityQueueSet<ChunkKey, float> dirtyChunks = new();
 
+        readonly GameWorld world;
+
         public RenderWorld(GameWorld world) {
             world.ChunkUpdated += HandleChunkUpdate;
+            this.world = world;
         }
 
         void HandleChunkUpdate(object sender, ChunkUpdatedEventArgs e) {
@@ -87,5 +91,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// </summary>
         public IEnumerable<ChunkKey> RenderedChunks()
             => Enumerators.EnumerateCopy(allChunks.Keys);
+
+        public void Dispose() {
+            world.ChunkUpdated -= HandleChunkUpdate;
+        }
     }
 }

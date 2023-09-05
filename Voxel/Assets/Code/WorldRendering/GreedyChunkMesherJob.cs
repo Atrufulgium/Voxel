@@ -555,6 +555,23 @@ namespace Atrufulgium.Voxel.WorldRendering {
             }
         }
 
+        /// <summary>
+        /// Only well-defined if removed in reverse order of added.
+        /// </summary>
+        internal static void VertToIndexRemove(Vertex v, NativeArray<VertToIndexEntry> vertToIndex) {
+            int tableIndex = (int)((uint)v.GetHashCode() % BUCKET_SIZE);
+            while (true) {
+                VertToIndexEntry entry = vertToIndex[tableIndex];
+                if (Hint.Likely(!entry.IsInitialised()))
+                    throw new ArgumentException("Given vertex is not in the table.");
+                if (Hint.Unlikely(entry.TryVertexMatches(v, out _))) {
+                    vertToIndex[tableIndex] = default;
+                    return;
+                }
+                tableIndex = (tableIndex + BUCKET_SIZE) & TABLE_MASK;
+            }
+        }
+
         internal readonly struct VertToIndexEntry {
             readonly Vertex vert;
             readonly ushort index;

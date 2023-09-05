@@ -151,6 +151,7 @@ namespace Atrufulgium.Voxel.World {
 
             if (newLoD <= LoD) {
                 // More detail
+                // TODO: optimise, like below
                 foreach((int3 coord, ushort material) in this) {
                     int3 cellMax = new(oldVoxelSize, oldVoxelSize, oldVoxelSize);
                     foreach(int3 offset in Enumerators.EnumerateVolume(max: cellMax, step: newVoxelSize)) {
@@ -160,8 +161,9 @@ namespace Atrufulgium.Voxel.World {
                 return newChunk;
             } else {
                 // Less detail
-                foreach ((int3 coord, ushort _) in newChunk) {
-                    newChunk[coord] = this[coord + (newVoxelSize >> 1)];
+                int stride = newVoxelSize / oldVoxelSize;
+                for (int i = 0; i < newChunk.voxels.Length; i++) {
+                    newChunk.voxels[i] = voxels[i * stride];
                 }
                 return newChunk;
             }

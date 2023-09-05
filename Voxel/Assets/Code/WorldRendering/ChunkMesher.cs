@@ -39,9 +39,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
             var chunk = input.chunk;
             var viewDir = input.viewDir;
 
-            // Unfortunately we actually need to clear the table, psh
-            vertToIndex.Clear();
-
             job = new GreedyChunkMesherJob {
                 chunk = chunk.GetCopy(),
                 viewDir = viewDir,
@@ -54,8 +51,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         public override void PostProcess(ref Mesh result, in GreedyChunkMesherJob job) {
-            job.chunk.Dispose();
-
             if (result == null) {
                 result = new Mesh();
             } else {
@@ -65,6 +60,21 @@ namespace Atrufulgium.Voxel.WorldRendering {
             int vertCount = job.verticesLength.Value;
             int quadCount = job.quadsLength.Value;
 
+            // Prepare next job already.
+            job.chunk.Dispose();
+            // Unfortunately we actually need to clear the entire table for
+            // next time as the entries are basically distributed randomly.
+            // For small vertCounts we can be a little tricksier.
+            if (vertCount < 1000) {
+                // Needs to be done backwards.
+                for (int i = vertCount - 1; i >= 0; i--) {
+                    GreedyChunkMesherJob.VertToIndexRemove(vertices[i], vertToIndex);
+                }
+            } else {
+                vertToIndex.Clear();
+            }
+            
+            // Back to actually doing output.
             result.SetVertexBufferParams(vertCount, Vertex.Layout);
             // (Flag 15 supresses all messages)
             result.SetVertexBufferData(job.vertices, 0, 0, vertCount, flags: (MeshUpdateFlags)15);
