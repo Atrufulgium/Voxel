@@ -1,8 +1,10 @@
-﻿using Atrufulgium.Voxel.World;
+﻿using Atrufulgium.Voxel.Collections;
+using Atrufulgium.Voxel.World;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Collections;
 using Unity.Mathematics;
-using Atrufulgium.Voxel.Collections;
+using UnityEngine.Profiling;
 
 namespace Atrufulgium.Voxel.WorldRendering {
     public class RenderWorldBehaviour : MonoBehaviour {
@@ -10,6 +12,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
         GameWorld world;
         RenderWorld renderWorld;
         ChunkMesher mesher;
+        OcclusionCulling occlusionCulling;
+        NativeParallelHashMap<ChunkKey, ChunkVisibility> occlusionData;
         new Transform transform;
         /// <summary>
         /// When requesting chunks, only update when we change position
@@ -25,6 +29,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         static Material voxelMat;
 
         Dictionary<ChunkKey, MeshFilter> meshes = new();
+        Dictionary<ChunkKey, MeshRenderer> objects = new();
 
         [Range(1,128)]
         public int RenderDistance = 16;
@@ -47,6 +52,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 CenterPoint = mainCamera.transform.position
             };
             mesher = new();
+            occlusionData = new(100000, Allocator.Persistent);
+            occlusionCulling = new(occlusionData);
             transform = GetComponent<Transform>();
 
             previousRenderDistance = RenderDistance;
@@ -72,10 +79,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
                     // try again later.
                     // This may only be needed if the race conditions are in our
                     // disadvantage (which they always are, of course).
-                    if (ChunkMesher.JobExists(key)) {
+                    if (ChunkMesher.JobExists(key) || OcclusionGraphBuilder.JobExists(key)) {
                         renderWorld.MarkDirty(key);
                     } else {
                         ChunkMesher.RunAsynchronously<ChunkMesher>(key, (chunk, 0));
+                        OcclusionGraphBuilder.RunAsynchronously<OcclusionGraphBuilder>(key, chunk);
                     }
                 }
             }
@@ -89,14 +97,22 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 Mesh mesh = filter.mesh;
                 // This already overwrites the mesh if true and does nothing
                 // when false.
-                if (ChunkMesher.PollJobCompleted(key, ref mesh)) {
-                    // Enqueue for occlusion
-                }
+                // Okay it's 100% true anyway.
+                ChunkMesher.PollJobCompleted(key, ref mesh);
             }
             foreach (var key in OcclusionGraphBuilder.GetAllCompletedJobs()) {
                 ChunkVisibility visibility = default;
                 OcclusionGraphBuilder.PollJobCompleted(key, ref visibility);
+
+            occlusionCulling.Occlude(mainCamera, out var visible);
+            Profiler.BeginSample("Occlusion Processing");
+            foreach (var (key, obj) in objects) {
+                bool shouldBeActive = visible.Contains(key);
+                bool currentActive = obj.enabled;
+                if (shouldBeActive != currentActive)
+                    obj.enabled = shouldBeActive;
             }
+            Profiler.EndSample();
         }
 
         void RequestMoreChunks(ChunkKey center) {
@@ -128,6 +144,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
             world.Dispose();
             renderWorld.Dispose();
             mesher.Dispose();
+            occlusionData.Dispose();
+            occlusionCulling.Dispose();
             WorldGen.DisposeStatic();
             ChunkMesher.DisposeStatic();
             OcclusionGraphBuilder.DisposeStatic();
@@ -139,7 +157,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
             newObject.transform.SetParent(transform);
             newObject.transform.position = (float3)key.Worldpos;
             MeshFilter filter = newObject.GetComponent<MeshFilter>();
-            newObject.GetComponent<MeshRenderer>().material = voxelMat;
+            MeshRenderer renderer = newObject.GetComponent<MeshRenderer>();
+            renderer.material = voxelMat;
+            objects.Add(key, renderer);
             meshes.Add(key, filter);
             return filter;
         }

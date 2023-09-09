@@ -87,6 +87,8 @@ struct VertexContainer {
 fixed4 frag (v2f i) : SV_Target {
     // Apply to a pure white texture (the default). This gives the light info.
     #if defined(IS_FORWARD_PASS)
+        // Just tesselate this. That way this has 0 impact far away and less
+        // impact nearby.
         #if defined(PIXEL_SHADOWS)
             // Make the shadow-map be sampled not smoothly but pixelated.
             // For that, we need to re-calculate where we should read the

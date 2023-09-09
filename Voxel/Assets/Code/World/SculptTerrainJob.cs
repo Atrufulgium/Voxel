@@ -41,6 +41,8 @@ namespace Atrufulgium.Voxel.World {
                     for (int y = 0; y < max; y++) {
                         int index = x + max * (y + max * z);
                         ushort mat = GetMaterial(basePos + new int3(x, y, z) * voxelSize, height);
+                        if (mat == 2 && GetMaterial(basePos + new int3(x, y + 1, z) * voxelSize, height) == 0)
+                            mat = 1;
                         arr[index] = mat;
                     }
                 }
@@ -50,7 +52,7 @@ namespace Atrufulgium.Voxel.World {
         ushort GetMaterial(int3 pos, int height) {
             ushort mat = 0;
             if (pos.y < height)
-                mat = 3;
+                mat = 2;
             noise.snoise((float3)pos * 0.003f + cavesOffset, out float3 gradient);
             gradient *= math.clamp(height * 0.05f, 0.5f, 1f);
             int3 largeGradient = (int3)(math.abs(gradient) > 0.7f);

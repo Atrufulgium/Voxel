@@ -60,11 +60,17 @@ namespace Atrufulgium.Voxel.WorldRendering {
         ) {
             if (!chunk.IsCreated)
                 throw new System.ArgumentException("The given chunk does not exist.");
-
             
             int maxIndex = chunk.VoxelsPerAxis;
 
-            if (!Reused) {
+            // When reusing, dispose and recreate everything when LoD changes
+            // as nearly everything depends on `maxIndex`.
+            bool reinit = Reused && chunkCopy.LoD != chunk.LoD;
+            if (reinit) {
+                DisposeThis();
+            }
+
+            if (!Reused || reinit) {
                 // This is like 100kB per instance at most. Very spammable.
                 chunkCopy = chunk.GetCopy();
                 allowsFloodfill = new(maxIndex * maxIndex, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -76,15 +82,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 arenaZNeg = new(maxIndex * maxIndex, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 this.maxIndex = new(maxIndex, Allocator.Persistent);
                 seen = new(Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            } else {
-                // Can't copy into a differently-sized chunk.
-                if (chunkCopy.LoD == chunk.LoD) {
-                    chunkCopy.FromRawArray(chunk);
-                } else {
-                    chunkCopy.Dispose();
-                    chunkCopy = chunk.GetCopy();
-                }
-                this.maxIndex.Value = maxIndex;
+            }
+            if (Reused && !reinit) {
+                chunkCopy.FromRawArray(chunk);
             }
 
             job1 = new() {
@@ -161,6 +161,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         public override void Dispose() {
+            DisposeThis();
+            base.Dispose();
+        }
+
+        void DisposeThis() {
             chunkCopy.Dispose();
             maxIndex.Dispose();
             allowsFloodfill.Dispose();
@@ -171,7 +176,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
             arenaYNeg.Dispose();
             arenaZNeg.Dispose();
             seen.Dispose();
-            base.Dispose();
         }
     }
 }
