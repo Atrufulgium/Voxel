@@ -89,7 +89,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             }
 
             foreach (var key in WorldGen.GetAllCompletedJobs())
-                WorldGen.PollJobCompleted(key, ref world);
+                WorldGen.TryComplete(key, ref world);
 
             foreach(var key in ChunkMesher.GetAllCompletedJobs()) {
                 if (!meshes.TryGetValue(key, out MeshFilter filter))
@@ -98,11 +98,13 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 // This already overwrites the mesh if true and does nothing
                 // when false.
                 // Okay it's 100% true anyway.
-                ChunkMesher.PollJobCompleted(key, ref mesh);
+                ChunkMesher.TryComplete(key, ref mesh);
             }
             foreach (var key in OcclusionGraphBuilder.GetAllCompletedJobs()) {
                 ChunkVisibility visibility = default;
-                OcclusionGraphBuilder.PollJobCompleted(key, ref visibility);
+                OcclusionGraphBuilder.TryComplete(key, ref visibility);
+                occlusionData.Add(key, visibility);
+            }
 
             occlusionCulling.Occlude(mainCamera, out var visible);
             Profiler.BeginSample("Occlusion Processing");
