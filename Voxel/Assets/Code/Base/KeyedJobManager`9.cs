@@ -6,7 +6,7 @@ namespace Atrufulgium.Voxel.Base {
     /// <remarks><inheritdoc cref="KeyedJobManagerBase{K, TInput, TResult, Self}"/></remarks>
     public abstract class KeyedJobManager<K, J1, J2, J3, J4, J5, J6, TInput, TResult>
         : KeyedJobManagerBase<K, TInput, TResult, KeyedJobManager<K, J1, J2, J3, J4, J5, J6, TInput, TResult>>, IDisposable
-        where K : IEquatable<K>
+        where K : unmanaged, IEquatable<K>
         where J1 : struct, IJob
         where J2 : struct, IJob
         where J3 : struct, IJob

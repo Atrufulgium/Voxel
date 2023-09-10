@@ -28,8 +28,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         static Material voxelMat;
 
-        Dictionary<ChunkKey, MeshFilter> meshes = new();
-        Dictionary<ChunkKey, MeshRenderer> objects = new();
+        readonly Dictionary<ChunkKey, MeshFilter> meshes = new();
+        readonly Dictionary<ChunkKey, MeshRenderer> objects = new();
 
         [Range(1,128)]
         public int RenderDistance = 16;
@@ -108,6 +108,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
             occlusionCulling.Occlude(mainCamera, out var visible);
             Profiler.BeginSample("Occlusion Processing");
+            // I'll probably have to Entities these chunk objects to get any
+            // semblance of performance. This won't work: 3ms at 8 chunk
+            // render distance, and 18ms at 16...
             foreach (var (key, obj) in objects) {
                 bool shouldBeActive = visible.Contains(key);
                 bool currentActive = obj.enabled;

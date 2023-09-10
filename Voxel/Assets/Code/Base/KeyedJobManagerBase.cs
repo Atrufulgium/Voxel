@@ -1,6 +1,8 @@
 ﻿using Atrufulgium.Voxel.Collections;
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using Unity.Collections;
 using Unity.Jobs;
 
 namespace Atrufulgium.Voxel.Base {
@@ -62,13 +64,17 @@ namespace Atrufulgium.Voxel.Base {
     /// </list>
     /// to force-finish all jobs and clean up all data.
     /// </para>
+    /// <para>
+    /// You call these as <tt>SomeManager.Method()</tt> of course, no need to
+    /// care about the base classes.
+    /// </para>
     /// </remarks>
     // The KeyedJobManager<>s should inheritdoc just the remarks.
     // I'm not doing `J[]` instead of the thousand `J1, J2, ..` generic
     // overloads because unity doesn't like actually working with the IJob
     // interface and it's bad for performance due to boxing anyawy.
     public abstract class KeyedJobManagerBase<K, TInput, TResult, Self> : IDisposable
-        where K : IEquatable<K>
+        where K : unmanaged, IEquatable<K>
         where Self : KeyedJobManagerBase<K, TInput, TResult, Self> {
 
         /// <summary>
@@ -115,15 +121,15 @@ namespace Atrufulgium.Voxel.Base {
         /// <summary>
         /// <para>
         /// Polls whether the job has been completed. If so, it puts the
-        /// result into <paramref name="result"/>. This is a <tt>ref</tt>
-        /// param so you can safe on garbage.
+        /// result into <paramref name="result"/> and resets the job.
+        /// This is a <tt>ref</tt> param so you can safe on garbage.
         /// </para>
         /// <para>
         /// When this returns false, <paramref name="result"/> should remain
         /// unaffected.
         /// </para>
         /// </summary>
-        bool PollJobCompleted(ref TResult result) {
+        bool TryCompleteJob(ref TResult result) {
             if (!unavailable)
                 throw new InvalidOperationException("Have not started any jobs to complete!");
             if (!finalHandle.IsCompleted) {
@@ -162,6 +168,8 @@ namespace Atrufulgium.Voxel.Base {
 
         protected static readonly Stack<Self> idleJobbers = new();
         protected static readonly Dictionary<K, Self> activeJobbers = new();
+        // Necessary for non-GC iteration.
+        protected static readonly NativeParallelHashSet<K> activeJobberKeys = new(100, Allocator.Persistent);
 
         /// <summary>
         /// This class introduces static disposables. If you care, you can
@@ -169,6 +177,7 @@ namespace Atrufulgium.Voxel.Base {
         /// NativeCollections, and then this is kind of required eventually.
         /// </summary>
         public static void DisposeStatic() {
+            activeJobberKeys.Dispose();
             if (activeJobbers.Count > 0) {
                 UnityEngine.Debug.LogWarning($"There are still {activeJobbers.Count} active jobs. Forcing them to finish before disposing them, but this might take a while!");
 
@@ -207,6 +216,7 @@ namespace Atrufulgium.Voxel.Base {
             }
             keyedJob.RunAsynchronously(input);
             activeJobbers.Add(key, keyedJob);
+            activeJobberKeys.Add(key);
         }
 
         /// <summary>
@@ -239,34 +249,89 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         public static bool TryComplete(K key, ref TResult result) {
             if (!activeJobbers.TryGetValue(key, out var jobber))
-                throw new ArgumentException($"There is no meshing job with ID {key}", nameof(key));
+                throw new ArgumentException($"There is no job with ID {key}", nameof(key));
 
-            if (jobber.PollJobCompleted(ref result)) {
+            if (jobber.TryCompleteJob(ref result)) {
                 activeJobbers.Remove(key);
+                activeJobberKeys.Remove(key);
                 idleJobbers.Push(jobber);
                 return true;
             }
             return false;
         }
 
+        static readonly List<K> tempCompletedJobs = new();
         /// <summary>
         /// Iterates through all jobs that have been finished and returns the
         /// keys. You can further handle the results of this with
         /// <see cref="TryComplete(K, ref TResult)"/>.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// This enumerates a copy of the active collection, so it is safe to
-        /// try and complete the operation.
+        /// try and complete the operation. This copy is GC-free if the
+        /// original collection's enumerator is.
+        /// </para>
+        /// <para>
+        /// This is a struct enumerator. If you're working with the
+        /// IEnumerable interfaces anywhere, take note of boxing. (Of course
+        /// no need to in the foreaches.)
+        /// </para>
         /// </remarks>
-        public static IEnumerable<K> GetAllCompletedJobs(int maxCompletions = int.MaxValue) {
-            int completed = 0;
-            foreach ((var key, var jobber) in Enumerators.EnumerateCopy(activeJobbers)) {
-                if (jobber.finalHandle.IsCompleted) {
-                    yield return key;
-                    completed++;
-                    if (completed >= maxCompletions)
-                        yield break;
-                }
+        // This was formerly implemented with yield, but generated garbage and
+        // this is quite the hot path. This removes all garbage except the
+        // dictionary's, which we can't remove because the alternative
+        // `NativeParallelHashMap<,>` requires `Self` to be a struct, which is
+        // strictly incompatible with all of our inheritance shenanigans.
+        public static CompletedJobsEnumerator GetAllCompletedJobs(int maxCompletions = int.MaxValue)
+            => new(activeJobbers, activeJobberKeys, tempCompletedJobs, maxCompletions);
+
+        /// <summary>
+        /// <para>
+        /// Given a key, gets the job result if it's done or does nothing if
+        /// it's not done yet.
+        /// </para>
+        /// <para>
+        /// This is <b>unsafe</b> in the sense that if this returns true:
+        /// <list type="bullet">
+        /// <item>
+        /// Using this makes <see cref="TryComplete(K, ref TResult)"/> throw on
+        /// this <paramref name="key"/>;
+        /// </item>
+        /// <item>
+        /// At the end of the scope, <paramref name="key"/> must be completed
+        /// with <see cref="CompleteJobs(IEnumerable{K})"/> lest you
+        /// have a bit of memory leak and a throw on <see cref="DisposeStatic"/>.
+        /// </item>
+        /// </list>
+        /// As the upside, this does not generate the garbage that
+        /// <see cref="GetAllCompletedJobs(int)"/> generates by copying the
+        /// entire active jobs list into a temporary one.
+        /// </para>
+        /// </summary>
+        public static bool TryGetResult(K key, ref TResult result) {
+            if (!activeJobbers.TryGetValue(key, out var jobber))
+                throw new ArgumentException($"There is no job with ID {key}", nameof(key));
+
+            return jobber.TryCompleteJob(ref result);
+        }
+
+        /// <summary>
+        /// <para>
+        /// Given a list of jobs -- that is assumed to have their <typeparamref name="TResult"/>
+        /// processed already -- this moves a job from the "active" pile to the
+        /// "idle" pile.
+        /// </para>
+        /// <para>
+        /// Using this makes no sense, unless you're using the dangerous method
+        /// <see cref="TryGetResult(K, ref TResult)"/>.
+        /// </para>
+        /// </summary>
+        public static void CompleteJobs(IEnumerable<K> keys) {
+            foreach (var key in keys) {
+                idleJobbers.Push(activeJobbers[key]);
+                activeJobbers.Remove(key);
+                activeJobberKeys.Remove(key);
             }
         }
 
@@ -275,5 +340,59 @@ namespace Atrufulgium.Voxel.Base {
         /// </summary>
         public static bool JobExists(K key)
             => activeJobbers.ContainsKey(key);
+
+        /// <summary>
+        /// As allocation-free enumeration of the complete jobs as you can get.
+        /// Would be nice to be able to use `yield` but that gives a class
+        /// enumerator.
+        /// </summary>
+        /// <remarks>
+        /// Do not instantiate this yourself. Leave that to
+        /// <see cref="GetAllCompletedJobs(int)"/>.
+        /// </remarks>
+        public struct CompletedJobsEnumerator : IEnumerable<K>, IEnumerator<K> {
+            public K Current => tempCompletedJobs[index];
+            int index;
+            readonly int maxCompleted;
+
+            readonly List<K> tempCompletedJobs;
+            readonly Dictionary<K, Self> activeJobbers;
+
+            public CompletedJobsEnumerator(
+                Dictionary<K, Self> activeJobbers,
+                NativeParallelHashSet<K> activeJobberKeys,
+                List<K> tempCompletedJobs,
+                int maxCompletions) {
+                // NativeParallelHashSet does not implement IEnumerable(<T>).
+                // Instead a custom enumerator. Thanks guys.
+                tempCompletedJobs.Clear();
+                var keyEnumerator = activeJobberKeys.GetEnumerator();
+                while (keyEnumerator.MoveNext()) {
+                    tempCompletedJobs.Add(keyEnumerator.Current);
+                }
+                this.tempCompletedJobs = tempCompletedJobs;
+
+                index = -1;
+                maxCompleted = maxCompletions;
+                this.activeJobbers = activeJobbers;
+            }
+
+            public bool MoveNext() {
+                while (++index < maxCompleted && index < tempCompletedJobs.Count) {
+                    var jobber = activeJobbers[Current];
+                    if (jobber.finalHandle.IsCompleted) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            object IEnumerator.Current => Current;
+            public void Reset() => throw new NotSupportedException();
+            public void Dispose() { }
+
+            public IEnumerator<K> GetEnumerator() => this;
+            IEnumerator IEnumerable.GetEnumerator() => this;
+        }
     }
 }

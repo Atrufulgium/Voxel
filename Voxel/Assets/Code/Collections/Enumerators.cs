@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections;
+using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -57,6 +58,58 @@ namespace Atrufulgium.Voxel.Collections {
             List<T> list = new(ts);
             foreach (T t in list)
                 yield return t;
+        }
+
+        /// <summary>
+        /// <para>
+        /// Iterates over all elements in a copy of ts.
+        /// In other words, ts is safe to modify.
+        /// </para>
+        /// <para>
+        /// This variant allows you to send a list to put temporary values in
+        /// in order to reduce GC pressure. However, this only removes the
+        /// pressure induced by <i>copying</i> the array, not the pressure from
+        /// iterating the array itself. Unity's <see cref="Unity.Collections"/>
+        /// have native collections with non-object enumerators that can
+        /// further reduce pressure.
+        /// </para>
+        /// </summary>
+        /// <remarks>
+        /// This of course means the iteration is preceded by an O(n) operation.
+        /// </remarks>
+        public static IEnumerable<T> EnumerateCopy<T>(IEnumerable<T> ts, List<T> tempContainer)
+            => new CopyEnumerator<T>(ts, tempContainer);
+
+        internal struct CopyEnumerator<T> : IEnumerable<T>, IEnumerator<T> {
+            public T Current { get; private set; }
+
+            int index;
+            readonly List<T> tempContainer;
+
+            public CopyEnumerator(IEnumerable<T> ts, List<T> tempContainer) {
+                tempContainer.Clear();
+                this.tempContainer = tempContainer;
+                foreach (T t in ts)
+                    tempContainer.Add(t);
+                index = -1;
+                Current = default;
+            }
+
+            public bool MoveNext() {
+                index++;
+                if (index < tempContainer.Count) {
+                    Current = tempContainer[index];
+                    return true;
+                }
+                return false;
+            }
+
+            object IEnumerator.Current => Current;
+            public void Reset() => throw new System.NotSupportedException();
+            public void Dispose() { }
+
+            public IEnumerator<T> GetEnumerator() => this;
+            IEnumerator IEnumerable.GetEnumerator() => this;
         }
 
         /// <summary>
