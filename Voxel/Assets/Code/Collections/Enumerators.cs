@@ -75,12 +75,33 @@ namespace Atrufulgium.Voxel.Collections {
         /// </para>
         /// </summary>
         /// <remarks>
+        /// <para>
         /// This of course means the iteration is preceded by an O(n) operation.
+        /// </para>
+        /// <para>
+        /// The return type does not implement <see cref="IEnumerable{T}"/>,
+        /// but is usable in <tt>foreach</tt> loops anyway. If you're in a
+        /// context where you actually need the interface, you are clearly in a
+        /// garbage-is-irrelevant situation and can use the overload without the
+        /// temp container, <see cref="EnumerateCopy{T}(IEnumerable{T})"/>.
+        /// </para>
         /// </remarks>
-        public static IEnumerable<T> EnumerateCopy<T>(IEnumerable<T> ts, List<T> tempContainer)
-            => new CopyEnumerator<T>(ts, tempContainer);
+        public static CopyEnumerator<T> EnumerateCopy<T>(IEnumerable<T> ts, List<T> tempContainer)
+            => new(ts, tempContainer);
 
-        internal struct CopyEnumerator<T> : IEnumerable<T>, IEnumerator<T> {
+        /// <summary>
+        /// Do not do anything with this struct manually, leave it to
+        /// <see cref="EnumerateCopy{T}(IEnumerable{T}, List{T})"/>.
+        /// </summary>
+        // Reminder:
+        // With `foreach`, the c# compiler *does not care* about the enumerator
+        // interfaces, it just checks for the existence of the relevant methods
+        // and properties.
+        // To reduce garbage, we have to avoid boxing from a struct to an
+        // IEnumerable<T>/IEnumerator<T>. So just "implement the interface" and
+        // then ditch the interface. Super whack. But c# does also do it itself
+        // with e.g. List<T>.
+        public struct CopyEnumerator<T> {
             public T Current { get; private set; }
 
             int index;
@@ -104,12 +125,7 @@ namespace Atrufulgium.Voxel.Collections {
                 return false;
             }
 
-            object IEnumerator.Current => Current;
-            public void Reset() => throw new System.NotSupportedException();
-            public void Dispose() { }
-
-            public IEnumerator<T> GetEnumerator() => this;
-            IEnumerator IEnumerable.GetEnumerator() => this;
+            public CopyEnumerator<T> GetEnumerator() => this;
         }
 
         /// <summary>

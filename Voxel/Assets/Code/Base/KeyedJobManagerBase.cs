@@ -350,7 +350,15 @@ namespace Atrufulgium.Voxel.Base {
         /// Do not instantiate this yourself. Leave that to
         /// <see cref="GetAllCompletedJobs(int)"/>.
         /// </remarks>
-        public struct CompletedJobsEnumerator : IEnumerable<K>, IEnumerator<K> {
+        // Reminder:
+        // With `foreach`, the c# compiler *does not care* about the enumerator
+        // interfaces, it just checks for the existence of the relevant methods
+        // and properties.
+        // To reduce garbage, we have to avoid boxing from a struct to an
+        // IEnumerable<T>/IEnumerator<T>. So just "implement the interface" and
+        // then ditch the interface. Super whack. But c# does also do it itself
+        // with e.g. List<T>.
+        public struct CompletedJobsEnumerator {
             public K Current => tempCompletedJobs[index];
             int index;
             readonly int maxCompleted;
@@ -362,7 +370,8 @@ namespace Atrufulgium.Voxel.Base {
                 Dictionary<K, Self> activeJobbers,
                 NativeParallelHashSet<K> activeJobberKeys,
                 List<K> tempCompletedJobs,
-                int maxCompletions) {
+                int maxCompletions
+            ) {
                 // NativeParallelHashSet does not implement IEnumerable(<T>).
                 // Instead a custom enumerator. Thanks guys.
                 tempCompletedJobs.Clear();
@@ -387,12 +396,7 @@ namespace Atrufulgium.Voxel.Base {
                 return false;
             }
 
-            object IEnumerator.Current => Current;
-            public void Reset() => throw new NotSupportedException();
-            public void Dispose() { }
-
-            public IEnumerator<K> GetEnumerator() => this;
-            IEnumerator IEnumerable.GetEnumerator() => this;
+            public CompletedJobsEnumerator GetEnumerator() => this;
         }
     }
 }
