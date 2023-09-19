@@ -53,5 +53,21 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
             (ChunkFace.YNeg, ChunkFace.ZNeg),
             (ChunkFace.ZPos, ChunkFace.ZNeg)
         };
+
+        [Test]
+        public void TestIsFullyVisible() {
+            // Just a sanity check
+            ChunkVisibility cv = ChunkVisibility.None;
+            foreach (var face in ChunkVisibility.AllChunkFaces())
+                Assert.AreEqual(true, cv.IsFullyInvisible(face), $"Full invis: Failed face {face}");
+
+            cv.SetVisible(ChunkFace.YPos, ChunkFace.ZNeg, true);
+            foreach (var face in ChunkVisibility.AllChunkFaces())
+                Assert.AreEqual(face != ChunkFace.YPos && face != ChunkFace.ZNeg, cv.IsFullyInvisible(face), $"Part invis: Failed face {face}");
+
+            cv = ChunkVisibility.All;
+            foreach (var face in ChunkVisibility.AllChunkFaces())
+                Assert.AreEqual(false, cv.IsFullyInvisible(face));
+        }
     }
 }

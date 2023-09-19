@@ -69,6 +69,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// Gets whether two faces are visible from one-another.
         /// (This defaults to true for all pairs, until set otherwise.)
         /// </summary>
+        /// <remarks>
+        /// This always returns <tt>true</tt> when <paramref name="a"/>
+        /// and <paramref name="b"/> are the same face.
+        /// </remarks>
         public bool GetVisible(ChunkFace a, ChunkFace b) {
             if (a == b)
                 return true;
@@ -101,6 +105,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
             uint2 mask = chunkFaceA & chunkFaceB;
             return (value & mask) == 0;
         }
+
+        /// <summary>
+        /// Whether a chunkface is not visible from any other face.
+        /// </summary>
+        public bool IsFullyInvisible(ChunkFace face)
+            => (value | (uint)face) == value;
 
         /// <summary>
         /// Converts this visibility to a vector ( ... ) of either included or

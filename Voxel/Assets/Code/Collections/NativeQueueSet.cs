@@ -79,12 +79,10 @@ namespace Atrufulgium.Voxel.Collections {
             );
         }
 
-        public IEnumerator GetEnumerator() {
-            return ((IEnumerable)set).GetEnumerator();
-        }
+        public IEnumerator GetEnumerator()
+            => throw new NotSupportedException("Use entities 2.2.0, or just Dequeue()-loop.");
 
-        IEnumerator<T> IEnumerable<T>.GetEnumerator() {
-            return ((IEnumerable<T>)set).GetEnumerator();
-        }
+        IEnumerator<T> IEnumerable<T>.GetEnumerator()
+            => throw new NotSupportedException("Use entities 2.2.0, or just Dequeue()-loop.");
     }
 }

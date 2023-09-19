@@ -1,4 +1,5 @@
-﻿using Atrufulgium.Voxel.World;
+﻿using Atrufulgium.Voxel.Base;
+using Atrufulgium.Voxel.World;
 using System;
 using System.Runtime.CompilerServices;
 using Unity.Burst;
@@ -306,8 +307,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
             // touch any changes or illegals, we _might_ be fine. We still
             // need to check the material is the same.
             // *Actually two masks, the first bit we care about may be a change.
-            uint rectMask = AllOnesUpTo(x2) & ~AllOnesUpTo(x);
-            uint smallRectMask = AllOnesUpTo(x2) & ~AllOnesUpTo(x + 1);
+            uint rectMask = BitMath.AllOnesIntervalHigh(x, x2);
+            uint smallRectMask = BitMath.AllOnesIntervalHigh(x+1, x2);
             ushort mat = GetChunk(x, y, layer, currentLayerMode);
 
             // While we're at it, mark the area as done.
@@ -348,36 +349,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
             );
         }
 
-        /// <summary>
-        /// <para>
-        /// Returns the zero-indexed bit-position of the first set bit.
-        /// The MSB is index 0, the LSB is index 31. Returns if 0.
-        /// </para>
-        /// <para>
-        /// This is clamped to [0,<see cref="max"/>], as we need that in every
-        /// relevant context.
-        /// </para>
-        /// </summary>
+        /// <inheritdoc cref="BitMath.FirstBinaryOneHigh(uint, int)"/>
         [return: AssumeRange(0, 32)]
-        int FirstBinaryOne(uint i)
-            => math.min(math.select(math.lzcnt(i), 32, i == 0), max);
+        int FirstBinaryOne(uint i) => BitMath.FirstBinaryOneHigh(i, max);
 
-        /// <summary>
-        /// <para>
-        /// Returns a uint that, counting from the LSB, is set to <tt>1</tt>
-        /// <paramref name="i"/> times, and then set to <tt>0</tt>
-        /// 32-<paramref name="i"/> times.
-        /// </para>
-        /// <para>
-        /// Valid inputs are 0..32.
-        /// </para>
-        /// </summary>
-        /// <remarks>
-        /// This is <i>excluding</i> index <paramref name="i"/> itself.
-        /// As such, <code>FirstBinaryOne(AllOnesUpTo(i+1)) = i</code>.
-        /// </remarks>
-        uint AllOnesUpTo([AssumeRange(0, 32)] int i)
-            => math.select(uint.MaxValue - (uint.MaxValue >> i), uint.MaxValue, i == 32);
+        /// <inheritdoc cref="BitMath.AllOnesUpToHigh(int)"/>
+        uint AllOnesUpTo([AssumeRange(0, 32)] int i) => BitMath.AllOnesUpToHigh(i);
 
         /// <summary>
         /// Whether the X-, Y-, or Z-direction is constant, and which side we
