@@ -12,12 +12,15 @@ namespace Atrufulgium.Voxel.WorldRendering {
         // Not our responsibility, needed for the job
         NativeParallelHashMap<ChunkKey, ChunkVisibility> occlusionData;
         // Our responsibility, used in the job
-        NativeParallelHashSet<ChunkKey> visible = new(100000, Allocator.Persistent);
+        NativeQueueSet<ChunkKey> visible = new(Allocator.Persistent);
         NativeQueueSet<ChunkKeyChunkFaceTuple> candidateChunks = new(Allocator.Persistent);
         NativeArray<float3> frustrumFarCorners = new(4, Allocator.Persistent);
         Vector3[] frustrumFarCornersArray = new Vector3[4];
         NativeReference<float3> cameraForward = new(Allocator.Persistent);
+        NativeReference<float3> cameraRight = new(Allocator.Persistent);
         NativeReference<float3> cameraPosition = new(Allocator.Persistent);
+        NativeReference<float4x4> worldToCameraMatrix = new(Allocator.Persistent);
+        NativeReference<float4x4> projectionMatrix = new(Allocator.Persistent);
 
         /// <summary>
         /// Constructs a culler that uses the visibility data provided in
@@ -34,9 +37,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// changes, so immediately use it. This class is responsibly for
         /// discarding the output.
         /// </summary>
-        public void Occlude(Camera camera, out NativeParallelHashSet<ChunkKey> visible) {
+        public void Occlude(Camera camera, out NativeQueueSet<ChunkKey> visible) {
             cameraPosition.Value = camera.transform.position;
             cameraForward.Value = camera.transform.forward;
+            cameraRight.Value = camera.transform.right;
+            worldToCameraMatrix.Value = camera.worldToCameraMatrix;
+            projectionMatrix.Value = camera.projectionMatrix;
             camera.CalculateFrustumCorners(
                 new(0, 0, 1, 1),
                 camera.farClipPlane,
@@ -55,8 +61,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 candidateChunks = candidateChunks,
                 frustrumFarCorners = frustrumFarCorners,
                 cameraForward = cameraForward,
-                cameraPosition = cameraPosition
+                cameraRight = cameraRight,
+                cameraPosition = cameraPosition,
+                worldToCameraMatrix = worldToCameraMatrix,
+                projectionMatrix = projectionMatrix
             };
+
             // TODO: Perhaps earlier in the frame to not block the main thread.
             // If I do it dynamically in OnPreCull though, that becomes harder.
             job.Run();
@@ -70,7 +80,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
             candidateChunks.Dispose();
             frustrumFarCorners.Dispose();
             cameraForward.Dispose();
+            cameraRight.Dispose();
             cameraPosition.Dispose();
+            worldToCameraMatrix.Dispose();
+            projectionMatrix.Dispose();
         }
 
         /// <summary>

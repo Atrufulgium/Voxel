@@ -28,8 +28,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         static Material voxelMat;
 
-        readonly Dictionary<ChunkKey, MeshFilter> meshes = new();
-        readonly Dictionary<ChunkKey, MeshRenderer> objects = new();
+        readonly Dictionary<ChunkKey, Mesh> meshes = new();
 
         [Range(1,128)]
         public int RenderDistance = 16;
@@ -92,9 +91,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 WorldGen.TryComplete(key, ref world);
 
             foreach(var key in ChunkMesher.GetAllCompletedJobs()) {
-                if (!meshes.TryGetValue(key, out MeshFilter filter))
-                    filter = CreateChunkMesh(key);
-                Mesh mesh = filter.mesh;
+                if (!meshes.TryGetValue(key, out Mesh mesh)) {
+                    mesh = new();
+                    meshes.Add(key, mesh);
+                }
                 // This already overwrites the mesh if true and does nothing
                 // when false.
                 // Okay it's 100% true anyway.
@@ -108,14 +108,17 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
             occlusionCulling.Occlude(mainCamera, out var visible);
             Profiler.BeginSample("Occlusion Processing");
-            // I'll probably have to Entities these chunk objects to get any
-            // semblance of performance. This won't work: 3ms at 8 chunk
-            // render distance, and 18ms at 16...
-            foreach (var (key, obj) in objects) {
-                bool shouldBeActive = visible.Contains(key);
-                bool currentActive = obj.enabled;
-                if (shouldBeActive != currentActive)
-                    obj.enabled = shouldBeActive;
+            while (visible.Count > 0) {
+                var key = visible.Dequeue();
+                if (meshes.TryGetValue(key, out var mesh)) {
+                    RenderParams renderParams = new() {
+                        material = voxelMat,
+                        receiveShadows = true,
+                        shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On,
+                        worldBounds = new((float3)key.Worldpos + 16, (float3)32)
+                    };
+                    Graphics.RenderMesh(renderParams, mesh, 0, Matrix4x4.Translate((float3)key.Worldpos));
+                }
             }
             Profiler.EndSample();
         }
@@ -154,19 +157,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
             WorldGen.DisposeStatic();
             ChunkMesher.DisposeStatic();
             OcclusionGraphBuilder.DisposeStatic();
-        }
-
-        private MeshFilter CreateChunkMesh(ChunkKey key) {
-            GameObject newObject = new("(Chunk)", typeof(MeshFilter), typeof(MeshRenderer));
-            newObject.hideFlags = HideFlags.HideInHierarchy;
-            newObject.transform.SetParent(transform);
-            newObject.transform.position = (float3)key.Worldpos;
-            MeshFilter filter = newObject.GetComponent<MeshFilter>();
-            MeshRenderer renderer = newObject.GetComponent<MeshRenderer>();
-            renderer.material = voxelMat;
-            objects.Add(key, renderer);
-            meshes.Add(key, filter);
-            return filter;
         }
     }
 }
