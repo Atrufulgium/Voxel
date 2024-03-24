@@ -154,6 +154,9 @@ namespace Atrufulgium.Voxel.Base {
             RunAsynchronously(input);
             finalHandle.Complete();
             PostProcessCaller(ref result);
+
+            finalHandle = default;
+            unavailable = false;
         }
 
         /// <summary>

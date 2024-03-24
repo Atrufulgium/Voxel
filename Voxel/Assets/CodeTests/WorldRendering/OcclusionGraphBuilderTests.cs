@@ -8,11 +8,6 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
     // In fact, nonzero LoD kind of _is_ the more difficult case.
     public class OcclusionGraphBuilderTests {
 
-        [TearDown]
-        public void TearDown() {
-            OcclusionGraphBuilder.DisposeStatic();
-        }
-
         [Test]
         public void TestEmpty() {
             ChunkVisibility actual = default;
