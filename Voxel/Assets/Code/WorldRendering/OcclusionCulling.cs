@@ -50,7 +50,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 frustrumFarCornersArray
             );
             for (int i = 0; i < 4; i++)
-                frustrumFarCorners[i] = camera.transform.TransformVector(frustrumFarCornersArray[i]);
+                frustrumFarCorners[i] = camera.transform.TransformPoint(frustrumFarCornersArray[i]);
             this.visible.Clear();
 
             //System.Diagnostics.Stopwatch sw = new();

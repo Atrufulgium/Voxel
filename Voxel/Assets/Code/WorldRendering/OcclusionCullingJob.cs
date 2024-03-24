@@ -19,7 +19,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// The result of the occlusion calculations. Included ones are rendered.
         /// Clear before the job.
         /// </summary>
-        [WriteOnly]
         public NativeQueueSet<ChunkKey> visible;
         /// <summary>
         /// All chunks that have yet to be processed on whether they are

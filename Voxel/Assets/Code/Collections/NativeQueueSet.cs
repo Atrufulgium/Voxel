@@ -10,10 +10,15 @@ namespace Atrufulgium.Voxel.Collections {
     /// existing element does nothing.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is implemented the lame way - using both a <see cref="NativeQueue{T}"/>
     /// and <see cref="NativeParallelHashSet{T}"/> at once, so if you care about
     /// memory and cache misses, be careful and preferably use something else
     /// if possible.
+    /// </para>
+    /// <para>
+    /// As such, whenever you write, you also read: [WriteOnly] never works.
+    /// </para>
     /// </remarks>
     public readonly struct NativeQueueSet<T>
         : INativeDisposable, IDisposable, IEnumerable<T>, IEnumerable, IReadOnlyCollection<T>
