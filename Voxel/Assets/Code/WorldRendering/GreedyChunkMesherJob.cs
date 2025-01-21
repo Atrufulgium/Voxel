@@ -19,7 +19,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// the chunks LoD.
         /// </summary>
         [ReadOnly]
-        internal Chunk chunk;
+        internal RawChunk chunk;
 
         /// <summary>
         /// Either a normalised vector representing the camera direction in the
@@ -116,7 +116,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             LoD = chunk.LoD;
 
             // TODO: the viewdir part.
-            for (int layer = 0; layer < Chunk.ChunkSize; layer += scale) {
+            for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
                 // Unfortunately need to pass currentLayerMode through all
                 // calls. Otherwise Burst doesn't see the "oh i can do this
                 // compile-time" trick.

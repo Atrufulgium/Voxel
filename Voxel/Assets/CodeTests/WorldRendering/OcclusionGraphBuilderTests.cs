@@ -11,7 +11,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestEmpty() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[4 * 4 * 4]);
+            RawChunk chunk = new(3, new ushort[4 * 4 * 4]);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
             chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
@@ -21,7 +21,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFilled() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1,
@@ -52,7 +52,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         public void TestFlatXPos() {
             ChunkVisibility actual = default;
             // (Recall XYZ order here: X→ Y↓ Z↓↓)
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 0,0,1,1,
                 0,0,1,1,
                 0,0,1,1,
@@ -87,7 +87,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatXNeg() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 1,1,0,0,
                 1,1,0,0,
                 1,1,0,0,
@@ -122,7 +122,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatYPos() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 0,0,0,0,
                 0,0,0,0,
                 1,1,1,1,
@@ -157,7 +157,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatYNeg() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 0,0,0,0,
@@ -192,7 +192,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatZPos() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 0,0,0,0,
                 0,0,0,0,
                 0,0,0,0,
@@ -227,7 +227,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatZNeg() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1,
@@ -263,7 +263,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestCup() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1,
@@ -293,7 +293,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestCorners() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 0,1,1,0,
                 1,1,1,1,
                 1,1,1,1,
@@ -326,7 +326,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestTunnels() {
             ChunkVisibility actual = default;
-            Chunk chunk = new(3, new ushort[] {
+            RawChunk chunk = new(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,0,1,1,

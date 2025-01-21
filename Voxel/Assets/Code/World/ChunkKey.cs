@@ -1,3 +1,4 @@
+using Atrufulgium.Voxel.WorldRendering;
 using System;
 using Unity.Mathematics;
 
@@ -10,7 +11,7 @@ namespace Atrufulgium.Voxel.World {
     public readonly struct ChunkKey : IEquatable<ChunkKey> {
         readonly int3 value;
         public int3 KeyValue => value;
-        public int3 Worldpos => value << Chunk.ChunkExponent;
+        public int3 Worldpos => value << RawChunk.ChunkExponent;
 
         private ChunkKey(int3 value)
             => this.value = value;
@@ -19,7 +20,7 @@ namespace Atrufulgium.Voxel.World {
         /// Constructs a new key corresponding to a position in the world.
         /// </summary>
         public static ChunkKey FromWorldPos(int3 pos)
-            => new(pos >> Chunk.ChunkExponent);
+            => new(pos >> RawChunk.ChunkExponent);
 
         /// <summary>
         /// <inheritdoc cref="FromWorldPos(int3)"/>
@@ -28,7 +29,7 @@ namespace Atrufulgium.Voxel.World {
         /// </para>
         /// </summary>
         public static ChunkKey FromWorldPos(int3 pos, out int3 chunkPos) {
-            chunkPos = pos & (Chunk.ChunkSize - 1);
+            chunkPos = pos & (RawChunk.ChunkSize - 1);
             return FromWorldPos(pos);
         }
 

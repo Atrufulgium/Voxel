@@ -14,9 +14,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
     public class ChunkMesher : KeyedJobManager<
         /* key */ ChunkKey,
         /* job */ GreedyChunkMesherJob,
-        /* in  */ (Chunk chunk, float3 viewDir),
+        /* in  */ (RawChunk chunk, float3 viewDir),
         /* out */ Mesh
     > {
+
+        static int MemoryFootprint = 0;
 
         public const int MAXVERTICES = ushort.MaxValue;
         // Every quad needs to be adjacent to air. The optimum is achieved
@@ -35,7 +37,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         NativeReference<int> quadsLength = new(Allocator.Persistent);
         NativeArray<GreedyChunkMesherJob.VertToIndexEntry> vertToIndex = new(TABLECAPACITY, Allocator.Persistent);
 
-        public override void Setup((Chunk chunk, float3 viewDir) input, out GreedyChunkMesherJob job) {
+        public override void Setup((RawChunk chunk, float3 viewDir) input, out GreedyChunkMesherJob job) {
             var chunk = input.chunk;
             var viewDir = input.viewDir;
 
@@ -79,6 +81,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
             // (Flag 15 supresses all messages)
             result.SetVertexBufferData(job.vertices, 0, 0, vertCount, flags: (MeshUpdateFlags)15);
 
+            int memoryDelta = vertCount * sizeof(uint);
+            memoryDelta += quadCount * sizeof(uint);
+            MemoryFootprint += memoryDelta;
+            Debug.Log($"Mesh Memory: {MemoryFootprint} bytes (+{memoryDelta})");
+
             result.SetIndexBufferParams(quadCount, IndexFormat.UInt16);
             result.SetIndexBufferData(job.quads, 0, 0, quadCount, flags: (MeshUpdateFlags)15);
 
@@ -89,8 +96,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
             // Settings bounds sends an update mssage
             result.bounds = new(
-                new(Chunk.ChunkSize / 2, Chunk.ChunkSize / 2, Chunk.ChunkSize / 2),
-                new(Chunk.ChunkSize, Chunk.ChunkSize, Chunk.ChunkSize)
+                new(RawChunk.ChunkSize / 2, RawChunk.ChunkSize / 2, RawChunk.ChunkSize / 2),
+                new(RawChunk.ChunkSize, RawChunk.ChunkSize, RawChunk.ChunkSize)
             );
         }
 

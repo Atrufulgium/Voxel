@@ -17,7 +17,7 @@ namespace Atrufulgium.Voxel.World {
         [ReadOnly]
         public NativeReference<Random> random;
 
-        public Chunk chunk;
+        public RawChunk chunk;
 
         float2 heightmapOffset;
         float3 cavesOffset;

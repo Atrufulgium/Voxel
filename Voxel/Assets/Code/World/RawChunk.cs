@@ -10,7 +10,7 @@ using Unity.Mathematics;
 namespace Atrufulgium.Voxel.World {
 
     /// <summary>
-    /// Represents a 32x32x32 cube of voxels.
+    /// Represents an uncompressed 32x32x32 cube of voxels.
     /// The voxel materials are ushorts.
     /// </summary>
     /// <remarks>
@@ -27,7 +27,7 @@ namespace Atrufulgium.Voxel.World {
     // Use virtual chunks.
     // Don't bother with z-curves, does not seem worth it in this project
     // from measurement -- about 7% slower.
-    public struct Chunk : IEnumerable<(int3, ushort)>, IDisposable {
+    public struct RawChunk : IEnumerable<(int3, ushort)>, IDisposable {
         /// <summary>
         /// A value [0,5] representing how much detail this chunk has.       <br/>
         /// A value of 0 represents a 32x32x32 cube with 1x1x1-sized voxels. <br/>
@@ -57,13 +57,13 @@ namespace Atrufulgium.Voxel.World {
         /// <summary>
         /// Creates a new empty chunk with specified LoD.
         /// </summary>
-        public Chunk(int LoD) {
+        public RawChunk(int LoD) {
             if (LoD is < 0 or > ChunkExponent)
                 throw new ArgumentException($"Only levels of detail 0--{ChunkExponent} are allowed.", nameof(LoD));
 
             this.LoD = LoD;
             int size = ChunkSize >> LoD;
-            voxels = new(size*size*size, Allocator.Persistent);
+            voxels = new(size * size * size, Allocator.Persistent);
             if (VoxelsPerAxis < 4)
                 throw new ArgumentException($"LoD may not be such that there are less than 4 voxels per axis.", nameof(LoD));
         }
@@ -77,7 +77,12 @@ namespace Atrufulgium.Voxel.World {
         /// 3D list ordered as first X, then Y, then Z.
         /// </para>
         /// </summary>
-        public Chunk(int LoD, IEnumerable<ushort> materials) : this(LoD) {
+        public RawChunk(int LoD, IEnumerable<ushort> materials) : this(LoD) {
+            FromRawArray(materials);
+        }
+        /// <inheritdoc cref="RawChunk(int, IEnumerable{ushort})"/>
+        public RawChunk(int LoD, Span<ushort> materials, bool spanHateSpanHate) : this(LoD) {
+            // (the bool arg to not have ambiguous definitions when you're writing literals)
             FromRawArray(materials);
         }
 
@@ -91,7 +96,7 @@ namespace Atrufulgium.Voxel.World {
         }
 
         /// <inheritdoc cref="this[int, int, int]"/>
-        public ushort this[int3 coord] { 
+        public ushort this[int3 coord] {
             get => voxels[CoordToIndex(coord)];
             set => voxels[CoordToIndex(coord)] = value;
         }
@@ -144,17 +149,17 @@ namespace Atrufulgium.Voxel.World {
         /// </para>
         /// </summary>
         /// <param name="LoD"> The new LoD to consider. </param>
-        public Chunk WithLoD(int newLoD) {
-            Chunk newChunk = new(newLoD);
+        public RawChunk WithLoD(int newLoD) {
+            RawChunk newChunk = new(newLoD);
             int oldVoxelSize = VoxelSize;
             int newVoxelSize = newChunk.VoxelSize;
 
             if (newLoD <= LoD) {
                 // More detail
                 // TODO: optimise, like below
-                foreach((int3 coord, ushort material) in this) {
+                foreach ((int3 coord, ushort material) in this) {
                     int3 cellMax = new(oldVoxelSize, oldVoxelSize, oldVoxelSize);
-                    foreach(int3 offset in Enumerators.EnumerateVolume(max: cellMax, step: newVoxelSize)) {
+                    foreach (int3 offset in Enumerators.EnumerateVolume(max: cellMax, step: newVoxelSize)) {
                         newChunk[coord + offset] = material;
                     }
                 }
@@ -179,8 +184,8 @@ namespace Atrufulgium.Voxel.World {
         /// <summary>
         /// Creates a copy of the chunk, including a copy of the voxel data.
         /// </summary>
-        public Chunk GetCopy() {
-            Chunk copy = new(LoD);
+        public RawChunk GetCopy() {
+            RawChunk copy = new(LoD);
             copy.voxels.CopyFrom(voxels);
             return copy;
         }
@@ -235,7 +240,21 @@ namespace Atrufulgium.Voxel.World {
                 throw new ArgumentException($"There are too few values for this chunk. Expected {voxels.Length}, got {written}.", nameof(values));
         }
         /// <inheritdoc cref="FromRawArray(IEnumerable{ushort})"/>
-        public void FromRawArray(Chunk values) {
+        // (Stupid code duplication because Span<ushort> : IEnumerable doesn't
+        //  exist because that could box.)
+        public void FromRawArray(Span<ushort> values) {
+            int written = 0;
+            foreach (ushort val in values) {
+                if (written >= voxels.Length)
+                    throw new ArgumentException($"There are too many values for this chunk. Expected {voxels.Length}, got more.", nameof(values));
+                voxels[written] = val;
+                written++;
+            }
+            if (written < voxels.Length)
+                throw new ArgumentException($"There are too few values for this chunk. Expected {voxels.Length}, got {written}.", nameof(values));
+        }
+        /// <inheritdoc cref="FromRawArray(IEnumerable{ushort})"/>
+        public void FromRawArray(RawChunk values) {
             FromRawArray(values.voxels);
         }
 
@@ -243,7 +262,7 @@ namespace Atrufulgium.Voxel.World {
         /// Returns a pointer to the underlying array.
         /// </summary>
         public unsafe ushort* GetUnsafeUnderlyingPtr()
-            => (ushort*) voxels.GetUnsafePtr();
+            => (ushort*)voxels.GetUnsafePtr();
 
         /// <summary>
         /// Returns a read-only pointer to the underlying array.

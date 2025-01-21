@@ -89,6 +89,9 @@ namespace Atrufulgium.Voxel.LSystem {
 
             this.rules = new IRule[26];
             foreach (var rule in rules) {
+                if (rule.StartsWith('#'))
+                    continue;
+
                 var (key, irule) = ParseRule(rule);
                 if (this.rules[key - 'A'] != null)
                     throw new ArgumentException($"Multiple rules for key {key}, this is not allowed.");
@@ -314,13 +317,13 @@ namespace Atrufulgium.Voxel.LSystem {
                     case '>': turt = turt.AfterRotateRoll(arg); break;
                     case 'M':
                         float3 a = turt.position;
-                        turt = turt.AfterMove(turt.rotation * Vector3.forward * arg);
+                        turt = turt.AfterMove(turt.rotation * Vector3.up * arg);
                         float3 b = turt.position;
                         lines.Add((a, b));
                         bounds.Encapsulate(a);
                         bounds.Encapsulate(b);
                         break;
-                    case 'N': turt = turt.AfterMove(turt.rotation * Vector3.forward * arg); break;
+                    case 'N': turt = turt.AfterMove(turt.rotation * Vector3.up * arg); break;
                     case '[': turtlesAllTheWayDown.Push(turt); break;
                     case ']': turt = turtlesAllTheWayDown.Pop(); break;
                     case 'L':

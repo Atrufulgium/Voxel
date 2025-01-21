@@ -24,7 +24,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /* job */ BitFloodfillJob,
         /* job */ BitFloodfillJob,
         /* job */ OcclussionFloodfillPostJob,
-        /* in  */ Chunk,
+        /* in  */ RawChunk,
         /* out */ ChunkVisibility
     > {
         // We have six floodfill jobs as each face startes from, well, a
@@ -36,7 +36,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         // as a feature inside KeyedJobManager<>. So in the end, it's like
         // this.
 
-        Chunk chunkCopy;
+        RawChunk chunkCopy;
         NativeArray<uint> allowsFloodfill;
         NativeArray<uint> arenaXPos;
         NativeArray<uint> arenaYPos;
@@ -48,7 +48,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         NativeReference<ChunkVisibility> seen;
 
         public override void Setup(
-            Chunk chunk,
+            RawChunk chunk,
             out OcclussionFloodfillPrepJob job1,
             out BitFloodfillJob job2,
             out BitFloodfillJob job3,

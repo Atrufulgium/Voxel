@@ -12,7 +12,7 @@ namespace Atrufulgium.Voxel.World {
     public struct CheckMonoChunkJob : IJob {
 
         [ReadOnly]
-        public Chunk chunk;
+        public RawChunk chunk;
 
         [WriteOnly]
         public NativeReference<bool> isMonoChunk;

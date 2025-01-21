@@ -73,7 +73,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             previousRenderDistance = RenderDistance;
 
             for (int i = 0; i < MAXPERFRAME; i++) {
-                if (renderWorld.TryGetDirtyChunk(out ChunkKey key, out Chunk chunk)) {
+                if (renderWorld.TryGetDirtyChunk(out ChunkKey key, out RawChunk chunk)) {
                     // If it's active already, put it at the end of the queue to
                     // try again later.
                     // This may only be needed if the race conditions are in our

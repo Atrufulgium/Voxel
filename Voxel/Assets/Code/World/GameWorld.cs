@@ -8,7 +8,7 @@ namespace Atrufulgium.Voxel.World {
     /// </summary>
     public class GameWorld : IDisposable {
 
-        readonly Dictionary<ChunkKey, Chunk> loadedChunks = new();
+        readonly Dictionary<ChunkKey, RawChunk> loadedChunks = new();
 
         /// <summary>
         /// This event is called whenever chunk information has been changed.
@@ -16,7 +16,7 @@ namespace Atrufulgium.Voxel.World {
         /// </summary>
         public event ChunkUpdatedEventHandler ChunkUpdated;
         public delegate void ChunkUpdatedEventHandler(object sender, ChunkUpdatedEventArgs e);
-        void OnChunkUpdated(ChunkKey k, Chunk c) {
+        void OnChunkUpdated(ChunkKey k, RawChunk c) {
             ChunkUpdated?.Invoke(this, new() { Chunk = c, Key = k });
         }
 
@@ -24,7 +24,7 @@ namespace Atrufulgium.Voxel.World {
         /// <para>
         /// Loads a chunk for later use. When this is loaded it automatically
         /// fires <see cref="ChunkUpdated"/>. You can also try to get it with
-        /// <see cref="TryGetChunk(ChunkKey, out Chunk, int)"/>.
+        /// <see cref="TryGetChunk(ChunkKey, out RawChunk, int)"/>.
         /// </para>
         /// <para>
         /// This (silently) does nothing when the chunk already exists.
@@ -39,7 +39,7 @@ namespace Atrufulgium.Voxel.World {
         /// <summary>
         /// Creates or overwrites an existing chunk with a given chunk.
         /// </summary>
-        public void SetChunk(ChunkKey key, Chunk chunk) {
+        public void SetChunk(ChunkKey key, RawChunk chunk) {
             if (loadedChunks.ContainsKey(key)) {
                 loadedChunks[key].Dispose();
                 loadedChunks[key] = chunk;
@@ -57,8 +57,8 @@ namespace Atrufulgium.Voxel.World {
         /// The optional LoD of the returned chunk. May be <tt>-1</tt> to leave
         /// the existing LoD as-is.
         /// </param>
-        public bool TryGetChunk(ChunkKey key, out Chunk value, int LoD = -1) {
-            if (loadedChunks.TryGetValue(key, out Chunk loadedChunk)) {
+        public bool TryGetChunk(ChunkKey key, out RawChunk value, int LoD = -1) {
+            if (loadedChunks.TryGetValue(key, out RawChunk loadedChunk)) {
                 if (LoD == -1 || loadedChunk.LoD == LoD)
                     value = loadedChunk;
                 else
@@ -82,7 +82,7 @@ namespace Atrufulgium.Voxel.World {
         /// <exception cref="ChunkNotLoadedException"></exception>
         public void Set(int3 position, ushort material) {
             ChunkKey key = ChunkKey.FromWorldPos(position, out int3 chunkPos);
-            if (!loadedChunks.TryGetValue(key, out Chunk chunk)) {
+            if (!loadedChunks.TryGetValue(key, out RawChunk chunk)) {
                 throw new ChunkNotLoadedException(key);
             }
             chunk[chunkPos] = material;
@@ -100,7 +100,7 @@ namespace Atrufulgium.Voxel.World {
         /// </summary>
         public bool TryGet(int3 position, out ushort material) {
             ChunkKey key = ChunkKey.FromWorldPos(position, out int3 chunkPos);
-            if (loadedChunks.TryGetValue(key, out Chunk chunk)) {
+            if (loadedChunks.TryGetValue(key, out RawChunk chunk)) {
                 material = chunk[chunkPos];
                 return true;
             }
@@ -115,7 +115,7 @@ namespace Atrufulgium.Voxel.World {
     }
 
     public class ChunkUpdatedEventArgs : EventArgs {
-        public Chunk Chunk { get; set; }
+        public RawChunk Chunk { get; set; }
         public ChunkKey Key { get; set; }
     }
 }

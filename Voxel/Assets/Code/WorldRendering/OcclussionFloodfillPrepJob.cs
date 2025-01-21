@@ -14,7 +14,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
     public struct OcclussionFloodfillPrepJob : IJob {
 
         [ReadOnly]
-        public Chunk chunk;
+        public RawChunk chunk;
 
         [WriteOnly]
         public NativeArray<uint> allowsFloodfill;

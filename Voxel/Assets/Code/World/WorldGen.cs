@@ -12,7 +12,7 @@ namespace Atrufulgium.Voxel.World {
     > {
         NativeReference<ChunkKey> key = new(Allocator.Persistent);
         NativeReference<Random> rng = new(new(1), Allocator.Persistent);
-        Chunk chunk = default;
+        RawChunk chunk = default;
         NativeReference<bool> isOnlyAir = new(Allocator.Persistent);
 
         unsafe public override void Setup((ChunkKey key, uint seed) input, out SculptTerrainJob job1, out CheckMonoChunkJob job2) {

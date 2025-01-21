@@ -277,15 +277,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b30c21a937b7a804681f1e95a3f04674, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  axiom: M-N-N
-  rules: 'M = M-N+M+N-M
+  axiom: -[A]+[A]+[A]
+  rules: 'A = 40 MB[ML][CMA]DMA, 20MA, 10CMA, 10DMA
 
-    N = NN'
-  iterations: 3
+    B = BB
+
+    C = 33 +, 33
+    ^, 33 >
+
+    D = 33 -, 33 v, 33 <'
+  iterations: 6
   seed: 0
-  defaultRot: 30
-  defaultMove: 1
-  logDebugs: 0
+  defaultRot: 15
+  defaultMove: 2
+  logDebugs: 1
   generate: 0
 --- !u!4 &708671568
 Transform:
