@@ -3,6 +3,26 @@ using NUnit.Framework;
 
 namespace Atrufulgium.Voxel.World.Tests {
     public class RLEChunkTests {
+
+        [Test]
+        public void TestCompressDecompress() {
+            RawChunk original = new(0);
+            Random rng = new(230);
+            for (int i = 0; i < 999999; i++) {
+                int3 pos = rng.NextInt3(32);
+                ushort mat = (ushort)rng.NextInt(4);
+                original[pos] = mat;
+            }
+
+            using RLEChunk compressed = new(original);
+            var decompressed = new RawChunk(compressed);
+
+            CollectionAssert.AreEquivalent(original, decompressed);
+
+            original.Dispose();
+            decompressed.Dispose();
+        }
+
         [Test]
         public void TestManyRandomWrites() {
             RLEChunk chunk = new(0);

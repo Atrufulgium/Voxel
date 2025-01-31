@@ -13,8 +13,9 @@ namespace Atrufulgium.Voxel.WorldRendering {
     /// </summary>
     public class ChunkMesher : KeyedJobManager<
         /* key */ ChunkKey,
+        /* job */ DecompressChunkJob,
         /* job */ GreedyChunkMesherJob,
-        /* in  */ (RawChunk chunk, float3 viewDir),
+        /* in  */ (RLEChunk chunk, float3 viewDir),
         /* out */ Mesh
     > {
 
@@ -37,12 +38,22 @@ namespace Atrufulgium.Voxel.WorldRendering {
         NativeReference<int> quadsLength = new(Allocator.Persistent);
         NativeArray<GreedyChunkMesherJob.VertToIndexEntry> vertToIndex = new(TABLECAPACITY, Allocator.Persistent);
 
-        public override void Setup((RawChunk chunk, float3 viewDir) input, out GreedyChunkMesherJob job) {
-            var chunk = input.chunk;
+        public override void Setup(
+            (RLEChunk chunk, float3 viewDir) input,
+            out DecompressChunkJob job1,
+            out GreedyChunkMesherJob job2
+        ) {
+            RLEChunk compressed = input.chunk.GetCopy();
+            RawChunk decompressed = new(0);
             var viewDir = input.viewDir;
 
-            job = new GreedyChunkMesherJob {
-                chunk = chunk.GetCopy(),
+            job1 = new DecompressChunkJob {
+                compressed = compressed,
+                decompressed = decompressed
+            };
+
+            job2 = new GreedyChunkMesherJob {
+                chunk = decompressed,
                 viewDir = viewDir,
                 vertices = vertices,
                 verticesLength = verticesLength,
@@ -52,18 +63,24 @@ namespace Atrufulgium.Voxel.WorldRendering {
             };
         }
 
-        public override void PostProcess(ref Mesh result, in GreedyChunkMesherJob job) {
+        public override void PostProcess(
+            ref Mesh result,
+            in DecompressChunkJob job1,
+            in GreedyChunkMesherJob job2
+        ) {
             if (result == null) {
                 result = new Mesh();
             } else {
                 result.Clear();
             }
 
-            int vertCount = job.verticesLength.Value;
-            int quadCount = job.quadsLength.Value;
+            int vertCount = job2.verticesLength.Value;
+            int quadCount = job2.quadsLength.Value;
 
-            // Prepare next job already.
-            job.chunk.Dispose();
+            // Get rid of temps
+            job1.compressed.Dispose();
+            job1.decompressed.Dispose();
+
             // Unfortunately we actually need to clear the entire table for
             // next time as the entries are basically distributed randomly.
             // For small vertCounts we can be a little tricksier.
@@ -79,7 +96,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             // Back to actually doing output.
             result.SetVertexBufferParams(vertCount, Vertex.Layout);
             // (Flag 15 supresses all messages)
-            result.SetVertexBufferData(job.vertices, 0, 0, vertCount, flags: (MeshUpdateFlags)15);
+            result.SetVertexBufferData(job2.vertices, 0, 0, vertCount, flags: (MeshUpdateFlags)15);
 
             int memoryDelta = vertCount * sizeof(uint);
             memoryDelta += quadCount * sizeof(uint);
@@ -87,7 +104,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
             Debug.Log($"Mesh Memory: {MemoryFootprint} bytes (+{memoryDelta})");
 
             result.SetIndexBufferParams(quadCount, IndexFormat.UInt16);
-            result.SetIndexBufferData(job.quads, 0, 0, quadCount, flags: (MeshUpdateFlags)15);
+            result.SetIndexBufferData(job2.quads, 0, 0, quadCount, flags: (MeshUpdateFlags)15);
 
             result.subMeshCount = 1;
             // Do note: The docs (<=5.4 already though) note that quads are

@@ -12,6 +12,8 @@ namespace Atrufulgium.Voxel.World {
     /// <summary>
     /// Represents an uncompressed 32x32x32 cube of voxels.
     /// The voxel materials are ushorts.
+    /// <br/>
+    /// Never use the parameterless constructor.
     /// </summary>
     /// <remarks>
     /// While this is technically a struct, the only thing you have write
@@ -66,6 +68,26 @@ namespace Atrufulgium.Voxel.World {
             voxels = new(size * size * size, Allocator.Persistent);
             if (VoxelsPerAxis < 4)
                 throw new ArgumentException($"LoD may not be such that there are less than 4 voxels per axis.", nameof(LoD));
+        }
+        
+        /// <summary>
+        /// Turns a <see cref="RLEChunk"/> into a new <see cref="RawChunk"/>.
+        /// <br/>
+        /// For the inverse operation, see <see cref="RLEChunk(RawChunk)"/>
+        /// constructor.
+        /// <br/>
+        /// For the operation that writes into an existing RawChunk, see
+        /// <see cref="SetFromRLEChunk(RLEChunk)"/>.
+        /// </summary>
+        public RawChunk(RLEChunk chunk) : this(0) {
+            SetFromRLEChunk(chunk);
+        }
+
+        public void SetFromRLEChunk(RLEChunk chunk) {
+            // TODO: RLEChunks don't implement LoD yet.
+            Span<ushort> arr = stackalloc ushort[32 * 32 * 32];
+            chunk.DecompressIntoMaterials(ref arr);
+            FromRawArray(arr);
         }
 
         /// <summary>
@@ -137,7 +159,7 @@ namespace Atrufulgium.Voxel.World {
 
         /// <summary>
         /// <para>
-        /// Returns a new chunk with a worse detail level than currently.
+        /// Returns a new chunk with a different detail level than this one.
         /// </para>
         /// <para>
         /// If the new LoD is worse(=higher), it will set the larger voxels to
@@ -182,7 +204,7 @@ namespace Atrufulgium.Voxel.World {
         }
 
         /// <summary>
-        /// Creates a copy of the chunk, including a copy of the voxel data.
+        /// Creates a deep copy of the chunk, including a copy of the voxel data.
         /// </summary>
         public RawChunk GetCopy() {
             RawChunk copy = new(LoD);

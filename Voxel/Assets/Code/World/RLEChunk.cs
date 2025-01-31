@@ -9,6 +9,8 @@ namespace Atrufulgium.Voxel.World {
     /// <summary>
     /// Represents a compressed 32x32x32 cube of voxels.
     /// The voxel materials are ushorts.
+    /// <br/>
+    /// Never use the parameterless constructor.
     /// </summary>
     /// <remarks>
     /// When doing few edits, you can use this chunk type directly. If your
@@ -22,9 +24,6 @@ namespace Atrufulgium.Voxel.World {
     /// Like <see cref="RawChunk"/>, this is just a native reference, so you
     /// can pass around instances of this struct as if it's an object.
     /// </remarks>
-    // TODO: Raycasting can be implemented slightly more performantly than just
-    // Get()ting everything because your direction vector gives a direction in
-    // the 1D array to binary search through.
     public struct RLEChunk : IEnumerable<(int3, ushort)>, IDisposable {
 
         /// <summary>
@@ -49,8 +48,13 @@ namespace Atrufulgium.Voxel.World {
         }
 
         /// <summary>
-        /// Turns a <see cref="RawChunk"/> into an <see cref="RLEChunk"/>.
-        /// For the inverse operation, see <see cref="Decompress"/>.
+        /// Turns a <see cref="RawChunk"/> into a new <see cref="RLEChunk"/>.
+        /// <br/>
+        /// For the inverse operation, see the <see cref="RawChunk(RLEChunk)"/>
+        /// constructor.
+        /// <br/>
+        /// For the operation that writes into an existing RLEChunk, see
+        /// <see cref="SetFromRawChunk(RawChunk)"/>.
         /// </summary>
         public unsafe RLEChunk(RawChunk chunk) {
             if (!chunk.IsCreated)
@@ -59,8 +63,41 @@ namespace Atrufulgium.Voxel.World {
             // Otherwise, upscale before, and dispose the upscale after.
             bool maxDetail = chunk.LoD == 0;
             if (!maxDetail)
-                chunk = chunk.WithLoD(0);
+                throw new NotImplementedException("LoDded RLEChunks are not supported.");
+            //if (!maxDetail)
+            //    chunk = chunk.WithLoD(0);
 
+            voxels = new(1, Allocator.Persistent);
+            FillRawChunkData(chunk);
+
+            //if (!maxDetail)
+            //    chunk.Dispose();
+        }
+
+        /// <summary>
+        /// Compresses a <see cref="RawChunk"/>'s data into this RLEChunk.
+        /// <br/>
+        /// To compress into a new chunk, use the <see cref="RLEChunk(RawChunk)"/>
+        /// constructor.
+        /// </summary>
+        public void SetFromRawChunk(RawChunk chunk) {
+            if (!chunk.IsCreated)
+                throw new ArgumentException("Tried to compress a non-existent chunk!");
+            if (!IsCreated)
+                throw new InvalidOperationException("Tried to compress into a non-existent chunk!");
+
+            bool maxDetail = chunk.LoD == 0;
+            if (!maxDetail)
+                throw new NotImplementedException("LoDded RLEChunks are not supported.");
+
+            FillRawChunkData(chunk);
+        }
+
+        /// <summary>
+        /// Clears and fills the internal <see cref="voxels"/> array based on
+        /// a <see cref="RawChunk"/>.
+        /// </summary>
+        private unsafe void FillRawChunkData(RawChunk chunk) {
             // Count the number of transitions in the array before creating a
             // list (as otherwise we'd just resize the thing a bazillion times)
             var ptr = chunk.GetUnsafeUnderlyingReadOnlyPtr();
@@ -70,11 +107,12 @@ namespace Atrufulgium.Voxel.World {
                     entries++;
             }
 
-            int capacity = (int)MathF.Round(entries * 1.4f);
+            int capacity = (int)math.round(entries * 1.4f);
             if (capacity < 1)
                 capacity = 1;
 
-            voxels = new(capacity, Allocator.Persistent);
+            voxels.Clear();
+            voxels.SetCapacity(capacity);
 
             // Actually write all values.
             voxels.Add(new(*ptr, 0));
@@ -85,16 +123,23 @@ namespace Atrufulgium.Voxel.World {
                     voxels.Add(new(currMat, i));
                 }
             }
+        }
 
-            if (!maxDetail)
-                chunk.Dispose();
+        public ushort this[int x, int y, int z] {
+            get => this[new int3(x, y, z)];
+            set => this[new int3(x, y, z)] = value;
+        }
+
+        public ushort this[int3 position] {
+            get => Get(position);
+            set => Set(position, value);
         }
 
         /// <summary>
         /// Returns the voxel at a specific location in a chunk.
         /// This is efficient.
         /// </summary>
-        public ushort Get(int3 position) {
+        internal ushort Get(int3 position) {
             if (!IsCreated)
                 throw new InvalidOperationException("Tried to get a non-existent chunk!");
 
@@ -106,7 +151,7 @@ namespace Atrufulgium.Voxel.World {
         /// particularly efficient -- if you need to set many voxels, first
         /// <see cref="Decompress"/> your chunk and then apply your changes.
         /// </summary>
-        public void Set(int3 position, ushort material) {
+        internal void Set(int3 position, ushort material) {
             if (!IsCreated)
                 throw new InvalidOperationException("Tried to set a non-existent chunk!");
 
@@ -269,15 +314,23 @@ namespace Atrufulgium.Voxel.World {
         }
 
         /// <summary>
-        /// Turns a <see cref="RLEChunk"/> into a <see cref="RawChunk"/>.
-        /// For the inverse operation, see the <see cref="RLEChunk(RawChunk)"/>
-        /// constructor.
+        /// Clears this chunk with air.
         /// </summary>
-        public unsafe RawChunk Decompress() {
-            // stackalloc'ing 6% of the usual stack limit is a terrible idea...
-            // letsgooo
-            Span<ushort> arr = stackalloc ushort[32 * 32 * 32];
-            var ptr = voxels.GetUnsafeTypedPtr();
+        public void Clear() {
+            voxels.Clear();
+            voxels.Add(new RLEEntry(0, 0));
+        }
+
+        /// <summary>
+        /// Reads the RLEChunk into a decompressed 32^3 materials list.
+        /// </summary>
+        // stackalloc'ing 6% of the usual stack limit is a terrible idea...
+        // letsgooo
+        internal unsafe void DecompressIntoMaterials(ref Span<ushort> arr) {
+            if (arr.Length != 32 * 32 * 32) {
+                throw new ArgumentException("The given array must be exactly 32x32x32.");
+            }
+            var ptr = voxels.GetUnsafeTypedReadOnlyPtr();
             int arri = 0;
             for (int i = 0; i < voxels.Length; i++) {
                 var entry = *(ptr + i);
@@ -291,7 +344,23 @@ namespace Atrufulgium.Voxel.World {
             if (arri != 32 * 32 * 32) {
                 throw new InvalidOperationException("Encountered malformed RLEChunk with incomplete data.");
             }
-            return new(0, arr, true);
+        }
+
+        /// <summary>
+        /// Creates a deep copy of the chunk, including a copy of the voxel data.
+        /// </summary>
+        public RLEChunk GetCopy() {
+            RLEChunk copy = new(0, voxels.Capacity);
+            copy.voxels.CopyFrom(voxels);
+            return copy;
+        }
+
+        /// <summary>
+        /// Overwrites the current chunk with a deep copy of another chunk's data.
+        /// </summary>
+        public void CopyFrom(RLEChunk other) {
+            voxels.Clear();
+            voxels.CopyFrom(other.voxels);
         }
 
         public void Dispose() => voxels.Dispose();

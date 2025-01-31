@@ -11,9 +11,11 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestEmpty() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[4 * 4 * 4]);
+            using RawChunk rawchunk
+                = new RawChunk(3, new ushort[4 * 4 * 4])
+                .WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             Assert.AreEqual(expected, actual);
         }
@@ -21,7 +23,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFilled() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1,
@@ -41,9 +43,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.None;
             Assert.AreEqual(expected, actual);
         }
@@ -52,7 +54,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         public void TestFlatXPos() {
             ChunkVisibility actual = default;
             // (Recall XYZ order here: X→ Y↓ Z↓↓)
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 0,0,1,1,
                 0,0,1,1,
                 0,0,1,1,
@@ -72,9 +74,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 0,0,1,1,
                 0,0,1,1,
                 0,0,1,1
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.XPos, ChunkFace.XNeg, false);
             expected.SetVisible(ChunkFace.XPos, ChunkFace.YPos, false);
@@ -87,7 +89,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatXNeg() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 1,1,0,0,
                 1,1,0,0,
                 1,1,0,0,
@@ -107,9 +109,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,0,0,
                 1,1,0,0,
                 1,1,0,0
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.XNeg, ChunkFace.XPos, false);
             expected.SetVisible(ChunkFace.XNeg, ChunkFace.YPos, false);
@@ -122,7 +124,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatYPos() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 0,0,0,0,
                 0,0,0,0,
                 1,1,1,1,
@@ -142,9 +144,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 0,0,0,0,
                 1,1,1,1,
                 1,1,1,1
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.YPos, ChunkFace.XPos, false);
             expected.SetVisible(ChunkFace.YPos, ChunkFace.XNeg, false);
@@ -157,7 +159,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatYNeg() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 0,0,0,0,
@@ -177,9 +179,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,1,1,
                 0,0,0,0,
                 0,0,0,0
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.YNeg, ChunkFace.XPos, false);
             expected.SetVisible(ChunkFace.YNeg, ChunkFace.XNeg, false);
@@ -192,7 +194,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatZPos() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 0,0,0,0,
                 0,0,0,0,
                 0,0,0,0,
@@ -212,9 +214,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.ZPos, ChunkFace.XPos, false);
             expected.SetVisible(ChunkFace.ZPos, ChunkFace.XNeg, false);
@@ -227,7 +229,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestFlatZNeg() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1,
@@ -247,9 +249,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 0,0,0,0,
                 0,0,0,0,
                 0,0,0,0
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.ZNeg, ChunkFace.XPos, false);
             expected.SetVisible(ChunkFace.ZNeg, ChunkFace.XNeg, false);
@@ -263,7 +265,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestCup() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1,
@@ -283,9 +285,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.None;
             Assert.AreEqual(expected, actual);
         }
@@ -293,7 +295,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestCorners() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 0,1,1,0,
                 1,1,1,1,
                 1,1,1,1,
@@ -313,9 +315,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,1,1,
                 1,1,1,1,
                 0,1,1,0
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.All;
             expected.SetVisible(ChunkFace.XPos, ChunkFace.XNeg, false);
             expected.SetVisible(ChunkFace.YPos, ChunkFace.YNeg, false);
@@ -326,7 +328,7 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
         [Test]
         public void TestTunnels() {
             ChunkVisibility actual = default;
-            RawChunk chunk = new(3, new ushort[] {
+            using RawChunk rawchunk = new RawChunk(3, new ushort[] {
                 1,1,1,1,
                 1,1,1,1,
                 1,0,1,1,
@@ -346,9 +348,9 @@ namespace Atrufulgium.Voxel.WorldRendering.Tests {
                 1,1,1,1,
                 1,1,1,1,
                 1,1,1,1
-            });
+            }).WithLoD(0);
+            using RLEChunk chunk = new(rawchunk);
             OcclusionGraphBuilder.RunSynchronously<OcclusionGraphBuilder>(chunk, ref actual);
-            chunk.Dispose();
             ChunkVisibility expected = ChunkVisibility.None;
             expected.SetVisible(ChunkFace.XNeg, ChunkFace.YPos, true);
             expected.SetVisible(ChunkFace.XNeg, ChunkFace.ZNeg, true);

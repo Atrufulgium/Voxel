@@ -26,7 +26,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// All chunks stored in this world. Note that all of these chunks are
         /// the live chunks, so no disposal necessary here.
         /// </summary>
-        readonly Dictionary<ChunkKey, RawChunk> allChunks = new();
+        readonly Dictionary<ChunkKey, RLEChunk> allChunks = new();
         /// <summary>
         /// All chunks that have been modified whose modifications have only
         /// been applied to the voxel array and not the rendering yet.
@@ -41,7 +41,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         void HandleChunkUpdate(object sender, ChunkUpdatedEventArgs e) {
-            RawChunk chunk = e.Chunk;
+            RLEChunk chunk = e.Chunk;
             ChunkKey key = e.Key;
             float dist = Distance(key);
             //if (dist > RenderDistance)
@@ -65,7 +65,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// <summary>
         /// If there's still dirty chunk, returns one.
         /// </summary>
-        public bool TryGetDirtyChunk(out ChunkKey key, out RawChunk chunk) {
+        public bool TryGetDirtyChunk(out ChunkKey key, out RLEChunk chunk) {
             if (dirtyChunks.TryDequeue(out key)) {
                 chunk = allChunks[key];
                 return true;

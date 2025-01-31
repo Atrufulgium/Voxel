@@ -14,8 +14,11 @@ namespace Atrufulgium.Voxel.WorldRendering {
     // This is not actually a problem as having many jobs fills up the workers
     // nicely anyway, and there's also other jobs going on. It only increases
     // latency a bit, but given how fast this code is, that's insignificant.
+    // TODO: At some point a test involving this failed. This seems rare and
+    //       nondeterministic, so uhhhh how tf did I manage that.
     public class OcclusionGraphBuilder : KeyedJobManager<
         /* key */ ChunkKey,
+        /* job */ DecompressChunkJob,
         /* job */ OcclussionFloodfillPrepJob,
         /* job */ BitFloodfillJob,
         /* job */ BitFloodfillJob,
@@ -24,7 +27,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /* job */ BitFloodfillJob,
         /* job */ BitFloodfillJob,
         /* job */ OcclussionFloodfillPostJob,
-        /* in  */ RawChunk,
+        /* in  */ RLEChunk,
         /* out */ ChunkVisibility
     > {
         // We have six floodfill jobs as each face startes from, well, a
@@ -36,7 +39,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
         // as a feature inside KeyedJobManager<>. So in the end, it's like
         // this.
 
-        RawChunk chunkCopy;
+        RLEChunk compressed;
+        RawChunk decompressed;
         NativeArray<uint> allowsFloodfill;
         NativeArray<uint> arenaXPos;
         NativeArray<uint> arenaYPos;
@@ -48,7 +52,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
         NativeReference<ChunkVisibility> seen;
 
         public override void Setup(
-            RawChunk chunk,
+            RLEChunk chunk,
+            out DecompressChunkJob job0,
             out OcclussionFloodfillPrepJob job1,
             out BitFloodfillJob job2,
             out BitFloodfillJob job3,
@@ -60,19 +65,23 @@ namespace Atrufulgium.Voxel.WorldRendering {
         ) {
             if (!chunk.IsCreated)
                 throw new System.ArgumentException("The given chunk does not exist.");
-            
-            int maxIndex = chunk.VoxelsPerAxis;
+
+            // For now, I'll disable the LoD system as RLEChunks don't have
+            // those. It'll return at some point, so I'm keeping the code.
+            // Look at the git diff of this commit for the old info.
+            int maxIndex = RawChunk.ChunkSize; // chunk.VoxelsPerAxis;
 
             // When reusing, dispose and recreate everything when LoD changes
             // as nearly everything depends on `maxIndex`.
-            bool reinit = Reused && chunkCopy.LoD != chunk.LoD;
+            bool reinit = false /*Reused && chunkCopy.LoD != chunk.LoD*/;
             if (reinit) {
                 DisposeThis();
             }
 
             if (!Reused || reinit) {
                 // This is like 100kB per instance at most. Very spammable.
-                chunkCopy = chunk.GetCopy();
+                compressed = chunk.GetCopy();
+                decompressed = new(0);
                 allowsFloodfill = new(maxIndex * maxIndex, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 arenaXPos = new(maxIndex * maxIndex, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 arenaYPos = new(maxIndex * maxIndex, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -84,11 +93,16 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 seen = new(Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
             if (Reused && !reinit) {
-                chunkCopy.FromRawArray(chunk);
+                compressed.CopyFrom(chunk);
             }
 
+            job0 = new() {
+                compressed = compressed,
+                decompressed = decompressed
+            };
+
             job1 = new() {
-                chunk = chunkCopy,
+                chunk = decompressed,
                 allowsFloodfill = allowsFloodfill,
                 startingPositionsXPos = arenaXPos,
                 startingPositionsYPos = arenaYPos,
@@ -148,6 +162,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         public override void PostProcess(
             ref ChunkVisibility result,
+            in DecompressChunkJob job0,
             in OcclussionFloodfillPrepJob job1,
             in BitFloodfillJob job2,
             in BitFloodfillJob job3,
@@ -166,7 +181,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
         }
 
         void DisposeThis() {
-            chunkCopy.Dispose();
+            compressed.Dispose();
+            decompressed.Dispose();
             maxIndex.Dispose();
             allowsFloodfill.Dispose();
             arenaXPos.Dispose();

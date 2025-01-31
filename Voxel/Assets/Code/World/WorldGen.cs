@@ -6,20 +6,27 @@ namespace Atrufulgium.Voxel.World {
     public class WorldGen : KeyedJobManager<
         /* key */ ChunkKey,
         /* job */ SculptTerrainJob,
-        /* job */ CheckMonoChunkJob,
+        /* job */ CompressChunkJob,
         /* in  */ (ChunkKey key, uint seed),
         /* out */ GameWorld
     > {
         NativeReference<ChunkKey> key = new(Allocator.Persistent);
         NativeReference<Random> rng = new(new(1), Allocator.Persistent);
         RawChunk chunk = default;
+        RLEChunk compressed = default;
         NativeReference<bool> isOnlyAir = new(Allocator.Persistent);
 
-        unsafe public override void Setup((ChunkKey key, uint seed) input, out SculptTerrainJob job1, out CheckMonoChunkJob job2) {
+        unsafe public override void Setup(
+            (ChunkKey key, uint seed) input,
+            out SculptTerrainJob job1,
+            out CompressChunkJob job2
+        ) {
             if (!Reused) {
-                chunk = new(1);
+                chunk = new(0);
+                compressed = new(0);
             } else {
                 chunk.Clear();
+                compressed.Clear();
             }
 
             key.Value = input.key;
@@ -34,25 +41,24 @@ namespace Atrufulgium.Voxel.World {
             };
 
             job2 = new() {
-                chunk = chunk,
-                isMonoChunk = isOnlyAir
+                decompressed = chunk,
+                compressed = compressed
             };
         }
 
-        public override void PostProcess(ref GameWorld world, in SculptTerrainJob job1, in CheckMonoChunkJob job2) {
-            // Mono chunks can be super low LoD, they're one material only.
-            // (This will usually be air)
-            // The lowest we support is 4 voxels per direction.
-            if (!job2.isMonoChunk.Value)
-                world.SetChunk(job1.key.Value, job1.chunk.GetCopy());
-            else
-                world.SetChunk(job1.key.Value, job1.chunk.WithLoD(3));
+        public override void PostProcess(
+            ref GameWorld world,
+            in SculptTerrainJob job1,
+            in CompressChunkJob job2
+        ) {
+            world.SetChunk(job1.key.Value, job2.compressed.GetCopy());
         }
 
         public override void Dispose() {
             key.Dispose();
             rng.Dispose();
             chunk.Dispose();
+            compressed.Dispose();
             isOnlyAir.Dispose();
             base.Dispose();
         }

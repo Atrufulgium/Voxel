@@ -178,6 +178,9 @@ namespace Atrufulgium.Voxel.Base {
         /// This class introduces static disposables. If you care, you can
         /// dispose them here. Usually with jobs you're using
         /// NativeCollections, and then this is kind of required eventually.
+        /// <br/>
+        /// If any jobs are still running, they are forcibly completed. This
+        /// may take some time.
         /// </summary>
         public static void DisposeStatic() {
             activeJobberKeys.Dispose();
