@@ -54,14 +54,15 @@ namespace Atrufulgium.Voxel.World.Tests {
         /// </summary>
         void TestBasicCase(int3 startMat, int index, bool end) {
             RawChunk reference = new(0);
+            RLEChunk chunk = new(0);
             int linIndex = end ? 32765 : 0;
             for (int i = 0; i < 3; i++) {
-                reference[RLEChunk.Vectorize(linIndex + i)] = (ushort)startMat[i];
+                reference[chunk.Vectorize(linIndex + i)] = (ushort)startMat[i];
             }
 
-            RLEChunk chunk = new(reference);
+            chunk.SetFromRawChunk(reference);
 
-            var pos = RLEChunk.Vectorize(linIndex + index);
+            var pos = chunk.Vectorize(linIndex + index);
             chunk.Set(pos, 0);
             reference[pos] = 0;
 

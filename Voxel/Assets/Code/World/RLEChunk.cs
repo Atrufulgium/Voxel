@@ -26,14 +26,28 @@ namespace Atrufulgium.Voxel.World {
     /// </remarks>
     public struct RLEChunk : IEnumerable<(int3, ushort)>, IDisposable {
 
+        /// <inheritdoc cref="RawChunk.LoD"/>
+        /// <remarks>
+        /// Unlike <see cref="RawChunk"/>, this LoD value may change if you
+        /// for instance overwrite data with <see cref="CopyFrom(RLEChunk)"/>.
+        /// </remarks>
+        public int LoD { get; private set; }
+        public int VoxelsPerAxis => ChunkSize >> LoD;
+        public int VoxelSize => 1 << LoD;
+
         /// <summary>
         /// A list of compressed chunk data. We first enumerate x, then y,
         /// then z. When created, the capacity of this list should be a little
         /// bigger (~40%?) to account for minor changes.
         /// </summary>
         // Invariant: There's always a (material: *, start: 0)-entry, nothing
-        // starts at 32^3 or later, and no start is used twice.
+        // starts at VoxelsPerAxis^3 or later, and no start is used twice.
         NativeList<RLEEntry> voxels;
+
+        /// <inheritdoc cref="RawChunk.ChunkExponent"/>
+        public const int ChunkExponent = RawChunk.ChunkExponent;
+        /// <inheritdoc cref="RawChunk.ChunkSize"/>
+        public const int ChunkSize = RawChunk.ChunkSize;
 
         /// <summary>
         /// Whether the underlying NativeList exists.
@@ -42,9 +56,18 @@ namespace Atrufulgium.Voxel.World {
         /// </summary>
         public bool IsCreated => voxels.IsCreated;
 
-        public RLEChunk(ushort material, int capacity = 1) {
+        /// <summary>
+        /// Creates a new chunk filled with <paramref name="material"/> with a
+        /// specified LoD.
+        /// </summary>
+        public RLEChunk(int LoD, ushort material = 0, int capacity = 1) {
+            if (LoD is < 0 or > ChunkExponent)
+                throw new ArgumentException($"Only levels of detail 0--{ChunkExponent} are allowed.", nameof(LoD));
+
+            this.LoD = LoD;
             voxels = new(capacity, Allocator.Persistent);
             voxels.Add(new(material, 0));
+            // TODO: We're allowing <4 here, but RawChunk doesn't.
         }
 
         /// <summary>
@@ -59,19 +82,10 @@ namespace Atrufulgium.Voxel.World {
         public unsafe RLEChunk(RawChunk chunk) {
             if (!chunk.IsCreated)
                 throw new ArgumentException("Tried to compress a non-existent chunk!");
-            // If we're at lod 0 then everything is fine.
-            // Otherwise, upscale before, and dispose the upscale after.
-            bool maxDetail = chunk.LoD == 0;
-            if (!maxDetail)
-                throw new NotImplementedException("LoDded RLEChunks are not supported.");
-            //if (!maxDetail)
-            //    chunk = chunk.WithLoD(0);
 
+            LoD = chunk.LoD;
             voxels = new(1, Allocator.Persistent);
             FillRawChunkData(chunk);
-
-            //if (!maxDetail)
-            //    chunk.Dispose();
         }
 
         /// <summary>
@@ -86,10 +100,6 @@ namespace Atrufulgium.Voxel.World {
             if (!IsCreated)
                 throw new InvalidOperationException("Tried to compress into a non-existent chunk!");
 
-            bool maxDetail = chunk.LoD == 0;
-            if (!maxDetail)
-                throw new NotImplementedException("LoDded RLEChunks are not supported.");
-
             FillRawChunkData(chunk);
         }
 
@@ -98,11 +108,13 @@ namespace Atrufulgium.Voxel.World {
         /// a <see cref="RawChunk"/>.
         /// </summary>
         private unsafe void FillRawChunkData(RawChunk chunk) {
+            LoD = chunk.LoD;
+
             // Count the number of transitions in the array before creating a
             // list (as otherwise we'd just resize the thing a bazillion times)
             var ptr = chunk.GetUnsafeUnderlyingReadOnlyPtr();
             int entries = 1; // the ambient material is already an entry
-            for (int i = 1; i < 32 * 32 * 32; i++) {
+            for (int i = 1; i < VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis; i++) {
                 if (*(ptr + i) != *(ptr + i - 1)) // every change adds an entry
                     entries++;
             }
@@ -116,7 +128,7 @@ namespace Atrufulgium.Voxel.World {
 
             // Actually write all values.
             voxels.Add(new(*ptr, 0));
-            for (int i = 1; i < 32 * 32 * 32; i++) {
+            for (int i = 1; i < VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis; i++) {
                 ushort currMat = *(ptr + i);
                 ushort prevMat = *(ptr + i - 1);
                 if (currMat != prevMat) {
@@ -217,7 +229,7 @@ namespace Atrufulgium.Voxel.World {
             
             // Special case: End of the RLE
             // Again, either +1, 0, or -1
-            if (linearized == 32 * 32 * 32 - 1) {
+            if (linearized == VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis - 1) {
                 if (i == previ) {
                     // +1 case "aa]"
                     voxels.Add(new(material, linearized));
@@ -322,13 +334,13 @@ namespace Atrufulgium.Voxel.World {
         }
 
         /// <summary>
-        /// Reads the RLEChunk into a decompressed 32^3 materials list.
+        /// Reads the RLEChunk into a decompressed <see cref="VoxelsPerAxis"/>^3 materials list.
         /// </summary>
-        // stackalloc'ing 6% of the usual stack limit is a terrible idea...
+        // stackalloc'ing up to 6% of the usual stack limit is a terrible idea...
         // letsgooo
         internal unsafe void DecompressIntoMaterials(ref Span<ushort> arr) {
-            if (arr.Length != 32 * 32 * 32) {
-                throw new ArgumentException("The given array must be exactly 32x32x32.");
+            if (arr.Length != VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis) {
+                throw new ArgumentException($"The given array must be exactly {VoxelsPerAxis}^3.");
             }
             var ptr = voxels.GetUnsafeTypedReadOnlyPtr();
             int arri = 0;
@@ -341,7 +353,7 @@ namespace Atrufulgium.Voxel.World {
                     arri++;
                 }
             }
-            if (arri != 32 * 32 * 32) {
+            if (arri != VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis) {
                 throw new InvalidOperationException("Encountered malformed RLEChunk with incomplete data.");
             }
         }
@@ -350,7 +362,7 @@ namespace Atrufulgium.Voxel.World {
         /// Creates a deep copy of the chunk, including a copy of the voxel data.
         /// </summary>
         public RLEChunk GetCopy() {
-            RLEChunk copy = new(0, voxels.Capacity);
+            RLEChunk copy = new(LoD, 0, voxels.Capacity);
             copy.voxels.CopyFrom(voxels);
             return copy;
         }
@@ -359,6 +371,7 @@ namespace Atrufulgium.Voxel.World {
         /// Overwrites the current chunk with a deep copy of another chunk's data.
         /// </summary>
         public void CopyFrom(RLEChunk other) {
+            LoD = other.LoD;
             voxels.Clear();
             voxels.CopyFrom(other.voxels);
         }
@@ -379,7 +392,7 @@ namespace Atrufulgium.Voxel.World {
                     yield return (Vectorize(linearIndex++), mat);
                 }
             }
-            if (linearIndex != 32 * 32 * 32) {
+            if (linearIndex != VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis) {
                 throw new InvalidOperationException("Encountered malformed RLEChunk with incomplete data.");
             }
         }
@@ -409,13 +422,22 @@ namespace Atrufulgium.Voxel.World {
         /// </summary>
         int GetRunLength(RLEEntry entry, int entryIndex) {
             if (entryIndex == voxels.Length - 1) {
-                return 32 * 32 * 32 - entry.start;
+                return VoxelsPerAxis * VoxelsPerAxis * VoxelsPerAxis - entry.start;
             }
             return voxels[entryIndex + 1].start - entry.start;
         }
 
-        internal static ushort Linearize(int3 index) => (ushort)math.dot(index, new(1, 32, 32 * 32));
-        internal static int3 Vectorize(int index) => new int3(index, index / 32, index / (32 * 32)) % 32;
+        internal ushort Linearize(int3 index)
+            => (ushort)math.dot(
+                index,
+                new(1, VoxelsPerAxis, VoxelsPerAxis * VoxelsPerAxis)
+            );
+        internal int3 Vectorize(int index)
+            => new int3(
+                index,
+                index / VoxelsPerAxis,
+                index / (VoxelsPerAxis * VoxelsPerAxis)
+            ) % VoxelsPerAxis;
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
