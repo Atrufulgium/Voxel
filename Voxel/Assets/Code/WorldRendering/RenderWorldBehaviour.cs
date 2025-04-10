@@ -37,6 +37,16 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         const int MAXPERFRAME = 500;
 
+        /// <summary>
+        /// The normals each of the submeshes <see cref="ChunkMesher"/> gives
+        /// us, in order.
+        /// </summary>
+        static readonly Vector3[] SubmeshNormals = {
+            Vector3.left, Vector3.right,
+            Vector3.down, Vector3.up,
+            Vector3.back, Vector3.forward
+        };
+
         private void Awake() {
             if (voxelMat == null)
                 voxelMat = Resources.Load<Material>("Materials/Voxel");
@@ -117,7 +127,44 @@ namespace Atrufulgium.Voxel.WorldRendering {
                         shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On,
                         worldBounds = new((float3)key.Worldpos + 16, (float3)32)
                     };
-                    Graphics.RenderMesh(renderParams, mesh, 0, Matrix4x4.Translate((float3)key.Worldpos));
+
+                    float3 nearestPointInChunk = math.clamp(pos, key.Worldpos, key.Worldpos + 32);
+                    float3 chunkDir = math.normalize(pos - nearestPointInChunk); // (NaN is fine)
+
+                    for (int subindex = 0; subindex < 6; subindex++) {
+                        // Don't render anything with no faces
+                        if (mesh.GetSubMesh(subindex).indexCount == 0)
+                            continue;
+
+                        // DEBUGGING, WHAT I KNOW:
+                        // (1) The layout of quads is correct and corresponds with
+                        //     the six directions as commented.
+                        // (2) The `nearestPointInChunk` calculation is correct.
+                        // (3) `SubmeshNormals` is correct.
+                        // (4) After the dot product, stuff is *incorrect*.
+
+                        // Faces are visible if one of the following hold:
+                        // (1) The chunk normal disagrees with the ray "chunk-
+                        //     to-camera"
+                        var d = math.dot(SubmeshNormals[subindex], chunkDir);
+
+                        bool visibleFace = d < 0.001;
+                        // (2) The chunk is AABB-aligned with the chunk the
+                        //     camera is in (this is needed for wells etc as we
+                        //     actually have a 32-wide range of faces instead of
+                        //     a single point)
+                        visibleFace |= math.csum((float3)(currentCenter.KeyValue == key.KeyValue)) > 1;
+
+                        if (!visibleFace)
+                            continue;
+
+                        Graphics.RenderMesh(
+                            renderParams,
+                            mesh,
+                            subindex,
+                            Matrix4x4.Translate((float3)key.Worldpos)
+                        );
+                    }
                 }
             }
             Profiler.EndSample();

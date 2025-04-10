@@ -56,14 +56,15 @@ namespace Atrufulgium.Voxel.WorldRendering {
         [WriteOnly]
         internal NativeArray<ushort> quads;
         /// <summary>
-        /// The part [0,quadCount) part of <see cref="quads"/> is filled with
-        /// sensible data, the rest is old or garbage.
+        /// The part [quadCount[i-1],quadCount[i]) part of <see cref="quads"/>
+        /// is represents the quads we see in face #i. Everything outside
+        /// [0,quadCount[5]) is old or garbage or anything else.
         /// </summary>
         /// <remarks>
         /// Don't read from this inside the job.
         /// </remarks>
         [WriteOnly]
-        internal NativeReference<int> quadsLength;
+        internal NativeArray<int> quadsLength;
         int quadCount;
 
         /// <summary>
@@ -77,11 +78,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
         /// </summary>
         // This is an implicit hash table. See the two VertToIndex.. methods.
         internal NativeArray<VertToIndexEntry> vertToIndex;
-
-        static readonly LayerMode[] renderDirections = new[] {
-            LayerMode.XUp, LayerMode.YUp, LayerMode.ZUp,
-            LayerMode.XDown, LayerMode.YDown, LayerMode.ZDown
-        };
 
         // burst
         // like
@@ -106,7 +102,6 @@ namespace Atrufulgium.Voxel.WorldRendering {
 
         int LoD;
 
-
         public void Execute() {
             _burstScaleValue = chunk.VoxelSize;
             _burstMaxValue = chunk.VoxelsPerAxis;
@@ -116,19 +111,35 @@ namespace Atrufulgium.Voxel.WorldRendering {
             LoD = chunk.LoD;
 
             // TODO: the viewdir part.
+
+            // Unfortunately need to pass currentLayerMode through all calls,
+            // and *explicitely* here. Otherwise Burst doesn't see the "oh i
+            // can do this compile-time" trick.
             for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
-                // Unfortunately need to pass currentLayerMode through all
-                // calls. Otherwise Burst doesn't see the "oh i can do this
-                // compile-time" trick.
                 HandleLayer(layer, LayerMode.XUp);
+            }
+            quadsLength[0] = quadCount;
+            for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
                 HandleLayer(layer, LayerMode.XDown);
+            }
+            quadsLength[1] = quadCount;
+            for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
                 HandleLayer(layer, LayerMode.YUp);
+            }
+            quadsLength[2] = quadCount;
+            for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
                 HandleLayer(layer, LayerMode.YDown);
+            }
+            quadsLength[3] = quadCount;
+            for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
                 HandleLayer(layer, LayerMode.ZUp);
+            }
+            quadsLength[4] = quadCount;
+            for (int layer = 0; layer < RawChunk.ChunkSize; layer += scale) {
                 HandleLayer(layer, LayerMode.ZDown);
             }
+            quadsLength[5] = quadCount;
             verticesLength.Value = vertCount;
-            quadsLength.Value = quadCount;
         }
 
         struct RectData {
@@ -385,8 +396,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
             if (mod == 1)
                 return new(y, layer, x);
             if (mod == 2)
-                return new(layer, x, y);
-            return new(x, y, layer);
+                return new(x, y, layer);
+            return new(layer, x, y);
         }
 
         int4x3 LayerToCoord(
@@ -402,8 +413,8 @@ namespace Atrufulgium.Voxel.WorldRendering {
             if (mod == 1)
                 return new(y, layer, x);
             if (mod == 2)
-                return new(layer, x, y);
-            return new(x, y, layer);
+                return new(x, y, layer);
+            return new(layer, x, y);
         }
 
         ushort GetChunk(

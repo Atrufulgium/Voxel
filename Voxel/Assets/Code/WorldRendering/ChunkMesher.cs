@@ -10,6 +10,10 @@ namespace Atrufulgium.Voxel.WorldRendering {
     /// <summary>
     /// Provides both instance methods for one mesh job at a time, as well as
     /// static methods for handling many meshings asynchronously.
+    /// <br/>
+    /// The resulting mesh has 6 submeshes. Each of these submeshes face only
+    /// one direction. In order, these normals are:
+    /// <c>(-1, 0, 0,)</c>, <c>(1, 0, 0)</c>, <c>(0, -1, 0)</c>, etc.
     /// </summary>
     public class ChunkMesher : KeyedJobManager<
         /* key */ ChunkKey,
@@ -35,7 +39,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
         NativeArray<Vertex> vertices = new(MAXVERTICES, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         NativeReference<int> verticesLength = new(Allocator.Persistent);
         NativeArray<ushort> quads = new(MAXQUADS, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-        NativeReference<int> quadsLength = new(Allocator.Persistent);
+        NativeArray<int> quadsLengths = new(6, Allocator.Persistent);
         NativeArray<GreedyChunkMesherJob.VertToIndexEntry> vertToIndex = new(TABLECAPACITY, Allocator.Persistent);
 
         public override void Setup(
@@ -58,7 +62,7 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 vertices = vertices,
                 verticesLength = verticesLength,
                 quads = quads,
-                quadsLength = quadsLength,
+                quadsLength = quadsLengths,
                 vertToIndex = vertToIndex
             };
         }
@@ -74,8 +78,12 @@ namespace Atrufulgium.Voxel.WorldRendering {
                 result.Clear();
             }
 
+            if (result.subMeshCount != 6)
+                result.subMeshCount = 6;
+
             int vertCount = job2.verticesLength.Value;
-            int quadCount = job2.quadsLength.Value;
+            var quadCounts = job2.quadsLength;
+            int quadCount = quadCounts[5];
 
             // Get rid of temps
             job1.compressed.Dispose();
@@ -106,23 +114,31 @@ namespace Atrufulgium.Voxel.WorldRendering {
             result.SetIndexBufferParams(quadCount, IndexFormat.UInt16);
             result.SetIndexBufferData(job2.quads, 0, 0, quadCount, flags: (MeshUpdateFlags)15);
 
-            result.subMeshCount = 1;
-            // Do note: The docs (<=5.4 already though) note that quads are
-            // often emulated. Is this still the case?
-            result.SetSubMesh(0, new SubMeshDescriptor(0, quadCount, MeshTopology.Quads), flags: (MeshUpdateFlags)15);
-
-            // Settings bounds sends an update mssage
-            result.bounds = new(
+            var bounds = new Bounds(
                 new(RawChunk.ChunkSize / 2, RawChunk.ChunkSize / 2, RawChunk.ChunkSize / 2),
                 new(RawChunk.ChunkSize, RawChunk.ChunkSize, RawChunk.ChunkSize)
             );
+
+            result.bounds = bounds;
+
+            // Do note: The docs (<=5.4 already though) note that quads are
+            // often emulated. Is this still the case?
+            for (int i = 0; i < 6; i++) {
+                int start = (i == 0) ? 0 : quadCounts[i - 1];
+                int count = quadCounts[i] - start;
+                result.SetSubMesh(
+                    i,
+                    new SubMeshDescriptor(start, count, MeshTopology.Quads) { bounds=bounds },
+                    flags: (MeshUpdateFlags)15
+                );
+            }
         }
 
         public override void Dispose() {
             vertices.Dispose();
             verticesLength.Dispose();
             quads.Dispose();
-            quadsLength.Dispose();
+            quadsLengths.Dispose();
             vertToIndex.Dispose();
             base.Dispose();
         }
